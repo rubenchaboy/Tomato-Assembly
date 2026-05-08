@@ -1,0 +1,1382 @@
+---
+title: "Análisis ASVs"
+author: "Ruben"
+date: "2026-01-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  eval = FALSE,  
+  echo = TRUE    
+)
+```
+
+1. [Carga de librerías](#librerias)
+2. [Carga del objeto](#objeto)
+3. [Preparación de los datos](#datos)
+4. [Análisis de ASVs](#ASVs)
+5. [Análisis Guisante](#Guisante)
+6. [Análisis Pimiento](#Pimiento)
+7. [Análisis Tomatillo](#Tomatillo)
+8. [Análisis Guisante - Tomate](#Guisante-Tomate)
+9. [Análisis Pimiento - Tomate](#Pimiento-Tomate)
+10. [Análisis Tomatillo - Tomate](#Tomatillo-Tomate)
+
+## Carga de librerías y datos {#librerias}
+
+```{r}
+library(writexl)
+library(readxl)
+library(phyloseq)
+library(brms)
+```
+
+## Carga del objeto {#objeto}
+
+```{r}
+ps_nocontrol_filtrado_rare <- readRDS("ps_nocontrol_filtrado_rare_noMF.rds")
+```
+
+## Preparación de los datos {#datos}
+
+```{r}
+set.seed(134)
+options(contrasts = c("contr.treatment", "contr.poly"))
+
+
+
+# 1) añadir ASV_ID 
+tt_orig <- as.data.frame(tax_table(ps_nocontrol_filtrado_rare))
+if (!("ASV_ID" %in% colnames(tt_orig))) {
+  tt_orig$ASV_ID <- paste0("ASV", seq_len(nrow(tt_orig)))   # ASV1, ASV2, ...
+  # opcional: mantener la secuencia original en una columna "Sequence"
+  tt_orig$Sequence <- taxa_names(ps_nocontrol_filtrado_rare)
+  tax_table(ps_nocontrol_filtrado_rare) <- as.matrix(tt_orig)
+  message("ASV_ID y Sequence añadidos a tax_table(ps_nocontrol_filtrado_rare) (en memoria).")
+} else {
+  message("ASV_ID ya existe en tax_table; no se modifica.")
+}
+
+
+# 1) calcular relativas en TODO el dataset (cada muestra suma 1)
+otu_all <- as(otu_table(ps_nocontrol_filtrado_rare), "matrix")
+if (taxa_are_rows(otu_table(ps_nocontrol_filtrado_rare))) otu_all <- t(otu_all)
+row_sums <- rowSums(otu_all)
+rel_all <- otu_all
+nz <- row_sums > 0
+rel_all[nz, ] <- sweep(otu_all[nz, , drop = FALSE], 1, row_sums[nz], FUN = "/")
+
+
+
+# 2) Preparación de los subsets
+ps_Guisante_6  <- subset_samples(ps_nocontrol_filtrado_rare, Tipo_planta == "Guisante"   & Pase == 6)
+ps_Pimiento_6  <- subset_samples(ps_nocontrol_filtrado_rare, Tipo_planta == "Pimiento"  & Pase == 6)
+ps_Tomatillo_6 <- subset_samples(ps_nocontrol_filtrado_rare, Tipo_planta == "Tomatillo" & Pase == 6)
+
+# 3) extraer la tabla de relativas correspondiente a cada subset (mismo orden que sample_names)
+rel_Guisante_6  <- rel_all[ match(sample_names(ps_Guisante_6), rownames(rel_all)), , drop = FALSE ]
+rel_Pimiento_6  <- rel_all[ match(sample_names(ps_Pimiento_6), rownames(rel_all)), , drop = FALSE ]
+rel_Tomatillo_6 <- rel_all[ match(sample_names(ps_Tomatillo_6), rownames(rel_all)), , drop = FALSE ]
+```
+
+## **Análisis de ASVS** {#ASVs}
+
+
+En este script se aplica un modelo bayesiano en dos etapas para comprobar si el modo de transmisión afecta a:
+
+1. La presencia/ausencia de ASV (colonización). Se aplica un modelo logístico Bernouilli (0/1) para estimar la probabilidad de presencia de cada ASV en función del modo de transmisión. Se incluyen efectos aleatorios de ASVs para permitir variación en la respuesta entre ASVs y también efectos aleatorios de planta para controlar la dependencia entre observaciones procedentes de la misma planta. 
+
+2. Los cambios de abundancia según el modo de transmisión. Para aquellos ASVs con abundancia superior a 0 la abundancia relativa se modela en escala logarítmica mediante la aplicaicón de una regresión lineal bayesiana, manteniendo los mismos efectos aleatorios que en el modelo anterior.  
+
+Debido a la nomenclatura aplicada, en el caso de los modelos aplicados para Pimiento y Tomatillo, así como a los aplicados para los análisis de Guisante-Tomate, Pimiento-Tomate, Tomatillo-Tomate se realiza una reordenación previa de las muestras para que las conespecíficas correspondan al primer bloque de plantas y las heteroespecíficas al segundo, permitiendo definir correctamente la variable "trans.type". 
+
+La definición de la variable "trans.type" depende del número de plantas de cada modo de transmisión. El primer bloque de plantas corresponde a la transmisión conespecífica y el siguiente a la heteroespecífica. El punto de corte puede variar según las réplicas disponibles para cada planta. Por ejemplo:
+
+trans.type_xxxx <- as.factor(1*(plant_xxxx<7)+1) Agrupa en el primer bloque las 6 primeras plantas 
+
+trans.type_xxxx <- as.factor(1*(plant_xxxx<6)+1) Agrupa en el primer bloque las 5 primeras plantas
+
+De esta forma se asigna el nivel 2 a las plantas del primer bloque (correspondiente a la transmisión conespecífica) mientras que el resto quedan asignadas al nivel 1 (transmisión heteroespecífica). A continuación, se interpreta el efecto asociado a trans.type2 como el contraste entre la transmisión conespecífica frente a la heteroespecífica.
+
+
+## Análisis Guisante {#Guisante}
+
+```{r}
+set.seed(134)
+# =============================================================================
+# Para Guisante
+# =============================================================================
+
+# mapear columnas de rel_Guisante_6 a ASV_ID
+
+mapped_ids_rel_guisante <- tt_orig$ASV_ID[ match(colnames(rel_Guisante_6), rownames(tt_orig)) ]
+if (any(is.na(mapped_ids_rel_guisante))) stop("Error mapeando rel_Guisante_6 a tax_table.")
+colnames(rel_Guisante_6) <- mapped_ids_rel_guisante
+
+# crear data.frame con relativas (SampleID + ASV1..ASVn)
+
+otu_df_rel_guisante <- data.frame(SampleID = rownames(rel_Guisante_6), rel_Guisante_6, check.names = FALSE)
+
+
+# comprobación rápida: las filas deben sumar ~1
+
+head(rowSums(otu_df_rel_guisante[ , -1]))
+
+if (!is.numeric(otu_df_rel_guisante[,1])) ASV3_guisante <- otu_df_rel_guisante[,2:ncol(otu_df_rel_guisante)] else  ASV3_guisante <- otu_df_rel_guisante[,1:ncol(otu_df_rel_guisante)]  
+
+sum(ASV3_guisante[1,])
+
+
+# Creación de variables
+
+yval_guisante <- c(as.numeric(as.matrix(ASV3_guisante[,])))
+species_guisante <- as.factor(rep(1:ncol(ASV3_guisante),each=11))
+plant_guisante <- rep(1:11,ncol(ASV3_guisante))
+trans.type_guisante <- as.factor(1*(plant_guisante<7)+1)
+plant_guisante <- as.factor(plant_guisante) 		# 1 para heteroespecífica, 2 para conespecífica
+
+
+
+# Primera Fase: Presencia/Ausencia	
+
+above.zero_guisante <- 1*(yval_guisante!=0)
+d.brm_guisante <- data.frame(above.zero=above.zero_guisante,trans.type=trans.type_guisante,species=species_guisante,plant=plant_guisante)
+contrasts(d.brm_guisante$trans.type)
+
+
+fit0_Guisante <- brm(above.zero~(trans.type|species)+(1|plant), family=bernoulli,data=d.brm_guisante,iter=8000) 
+
+levels(d.brm_guisante$trans.type)
+table(d.brm_guisante$trans.type)
+
+# Relación entre niveles de planta y tipo de transmisión
+
+data.frame(plant = levels(d.brm_guisante$plant),
+           trans.type = sapply(levels(d.brm_guisante$plant),
+                               function(p) unique(as.character(d.brm_guisante$trans.type[d.brm_guisante$plant == p]))))
+
+
+
+# Extraer las pendientes y ordenarlas
+
+ran0_guisante <- ranef(fit0_Guisante)  
+trans.species.effect_guisante <- ran0_guisante$species[,,"trans.type2"]  #Se selecciona el nivel 2 que es el conespecífico
+o0_guisante <- order(trans.species.effect_guisante[,1])
+
+## Identificación de  ASVs relevantes 
+
+species.that.colonize.worse_guisante <- which(trans.species.effect_guisante[,4]<0,arr.ind=TRUE)  #β < 0 => nivel "2" tiene menor respuesta que nivel "1", es decir, la presencia se asocia a la transmisión heteroespecífica
+
+species.that.colonize.better_guisante <- which(trans.species.effect_guisante[,3]>0,arr.ind=TRUE) #β > 0 => nivel "2" tiene mayor respuesta que nivel "1", es decir, la presencia se asocia a la transmisión conespecífica
+
+
+samps <- sample_names(ps_Guisante_6)
+plant_index <- 1:length(samps)
+data.frame(plant = plant_index, Sample = samps)
+
+
+
+colnames(ASV3_guisante)[species.that.colonize.worse_guisante]  # Mejor en las heteroespecíficas
+colnames(ASV3_guisante)[species.that.colonize.better_guisante]  # Mejor en las conespecíficas
+
+
+idx_colonize_worse_guisante <- as.integer(species.that.colonize.worse_guisante)
+asv_colonize_worse_guisante <- colnames(ASV3_guisante)[ idx_colonize_worse_guisante ]
+head(asv_colonize_worse_guisante)
+
+
+idx_colonize_better_guisante <- as.integer(species.that.colonize.better_guisante)
+asv_colonize_better_guisante <- colnames(ASV3_guisante)[ idx_colonize_better_guisante ]
+head(asv_colonize_better_guisante)
+
+
+
+# Segunda Fase: relación de la abundancia con el modo de transmisión
+
+d.brm1_guisante <- data.frame(yvalN=log(yval_guisante),trans.typeN=trans.type_guisante,speciesN=species_guisante,plantN=plant_guisante)
+d.brm1_guisante <- d.brm1_guisante[above.zero_guisante==1,]
+cat("Filas (obs positivas):", nrow(d.brm1_guisante), "\n")
+table(d.brm1_guisante$trans.typeN)
+
+
+fit1_guisante <- brm(yvalN~(trans.typeN|speciesN)+(1|plantN), data=d.brm1_guisante,iter=8000) 
+
+
+# Extraer las pendientes y ordenarlas
+
+ran1_guisante <- ranef(fit1_guisante, summary = TRUE)
+trans.species.effect1_guisante <- ran1_guisante$speciesN[,,"trans.typeN2"]
+o1_guisante <- order(trans.species.effect1_guisante[,1])
+
+## Identificación de  ASVs relevantes 
+
+species.that.ra.worse_guisante <- which(trans.species.effect1_guisante[,4]<0,arr.ind=TRUE) # Menos abundante en conespecífica.
+species.that.ra.better_guisante <- which(trans.species.effect1_guisante[,3]>0,arr.ind=TRUE) # Menos abundante en Heteroespecífica.
+
+colnames(ASV3_guisante)[species.that.ra.worse_guisante] 
+colnames(ASV3_guisante)[species.that.ra.better_guisante]
+
+
+idx_ra_worse_guisante <- as.integer(species.that.ra.worse_guisante)
+asv_ra_worse_guisante <- colnames(ASV3_guisante)[ idx_ra_worse_guisante ]
+head(asv_ra_worse_guisante)
+
+
+idx_ra_better_guisante <- as.integer(species.that.ra.better_guisante)
+asv_ra_better_guisante <- colnames(ASV3_guisante)[ idx_ra_better_guisante ]
+head(asv_ra_better_guisante)
+
+
+
+# Definir vectores de ASVs (
+presence_more_cone_guisante   <- as.character(if (exists("asv_colonize_better_guisante")) asv_colonize_better_guisante else character(0))
+presence_more_hetero_guisante <- as.character(if (exists("asv_colonize_worse_guisante"))  asv_colonize_worse_guisante  else character(0))
+abundance_more_cone_guisante   <- as.character(if (exists("asv_ra_better_guisante"))      asv_ra_better_guisante      else character(0))
+abundance_more_hetero_guisante <- as.character(if (exists("asv_ra_worse_guisante"))             asv_ra_worse_guisante             else character(0))
+
+# todas los ASVs que aparecen en alguna categoría (sin duplicados)
+all_asvs_guisante <- sort(unique(c(presence_more_cone_guisante, presence_more_hetero_guisante, abundance_more_cone_guisante, abundance_more_hetero_guisante)))
+
+
+# construir data.frame 
+df_guisante <- data.frame(
+  ASV = all_asvs_guisante,
+  Presence_more_Conespecific_guisante   = all_asvs_guisante %in% presence_more_cone_guisante,
+  Presence_more_heteroespecific_guisante = all_asvs_guisante %in% presence_more_hetero_guisante,
+  Abundance_more_Conespecific_guisante = all_asvs_guisante %in% abundance_more_cone_guisante,
+  Abundance_more_heteroespecific_guisante = all_asvs_guisante %in% abundance_more_hetero_guisante,
+  stringsAsFactors = FALSE
+)
+
+# añadir taxonomía
+if (exists("ps_nocontrol_filtrado_rare")) {
+  tt <- as.data.frame(tax_table(ps_nocontrol_filtrado_rare))
+df_guisante$ASV <- as.character(df_guisante$ASV)
+  tt$ASV_ID       <- as.character(tt$ASV_ID)
+
+  # unir por la columna ASV_ID en tt
+  idx_guisante <- match(df_guisante$ASV, tt$ASV_ID)
+
+  # función simple para limpiar prefijos tipo "f__", "g__", etc.
+  clean <- function(x) {
+    x <- as.character(x)
+    x[ x %in% c("", " ", "NA", NA) ] <- NA
+    x <- sub("^[a-z]__\\s*", "", x, ignore.case = TRUE)
+    x <- trimws(x)
+    x[ x == "" ] <- NA
+    x
+  }
+
+  df_guisante$Family <- clean(tt$Family[idx_guisante])
+  df_guisante$Genus  <- clean(tt$Genus[idx_guisante])
+
+  # aviso si hay ASVs sin unir
+  no_match <- df_guisante$ASV[ is.na(idx_guisante) ]
+  if (length(no_match) > 0) message("ASVs sin match en tt$ASV_ID: ", paste(head(no_match, 20), collapse = ", "))
+} else {
+  df_guisante$Family <- NA
+  df_guisante$Genus  <- NA
+}
+
+# guardar CSV
+
+outfile_guisante <- "ASV_onefile_summary_guisante.csv"
+write.csv(df_guisante, outfile_guisante, row.names = FALSE)
+cat("Wrote", outfile_guisante, "with", nrow(df_guisante), "rows\n")
+print(df_guisante)
+
+
+```
+
+## Análisis Pimiento {#Pimiento}
+
+```{r}
+
+set.seed(134)
+
+# =============================================================================
+# Para Pimiento
+# =============================================================================
+
+ps_Pimiento_6  <- subset_samples(ps_nocontrol_filtrado_rare, Tipo_planta == "Pimiento"  & Pase == 6)
+sd_Pimiento <- as.data.frame(sample_data(ps_Pimiento_6))
+ordered_samples_pimiento <- c(rownames(sd_Pimiento)[sd_Pimiento$Tipo_linea == "Conespecífica"],
+                     rownames(sd_Pimiento)[sd_Pimiento$Tipo_linea == "Heteroespecífica"],
+                     setdiff(rownames(sd_Pimiento), rownames(sd_Pimiento)[sd_Pimiento$Tipo_linea %in% c("Conespecífica","Heteroespecífica")]))
+
+
+
+# 1) Reordenar sample_data
+
+sample_data(ps_Pimiento_6) <- sample_data(sd_Pimiento[ordered_samples_pimiento, , drop = FALSE])
+
+# 2) Reordenar la otu_table para que coincida
+
+if (taxa_are_rows(otu_table(ps_Pimiento_6))) {
+  ot <- as(otu_table(ps_Pimiento_6), "matrix")
+  ot <- ot[, ordered_samples_pimiento, drop = FALSE]
+  otu_table(ps_Pimiento_6) <- otu_table(ot, taxa_are_rows = TRUE)
+} else {
+  ot <- as(otu_table(ps_Pimiento_6), "matrix")
+  ot <- ot[ordered_samples_pimiento, , drop = FALSE]
+  otu_table(ps_Pimiento_6) <- otu_table(ot, taxa_are_rows = FALSE)
+}
+
+# 3) Comprobar resultado
+
+cat("sample_names ahora:\n"); print(head(sample_names(ps_Pimiento_6), 20))
+cat("Tabla Tipo_linea (orden en sample_data):\n"); print(table(as.character(sample_data(ps_Pimiento_6)$Tipo_linea)))  
+  
+
+
+rel_Pimiento_6  <- rel_all[ match(sample_names(ps_Pimiento_6), rownames(rel_all)), , drop = FALSE ]
+
+
+# mapear columnas de rel_Pimiento_6 a ASV_ID 
+
+tt_orig <- as.data.frame(tax_table(ps_nocontrol_filtrado_rare))
+mapped_ids_rel_pimiento <- tt_orig$ASV_ID[ match(colnames(rel_Pimiento_6), rownames(tt_orig)) ]
+if (any(is.na(mapped_ids_rel_pimiento))) stop("Error mapeando rel_Pimiento_6 a tax_table.")
+colnames(rel_Pimiento_6) <- mapped_ids_rel_pimiento
+
+# crear data.frame con relativas (SampleID + ASV1..ASVn)
+
+otu_df_rel_pimiento <- data.frame(SampleID = rownames(rel_Pimiento_6), rel_Pimiento_6, check.names = FALSE)
+
+
+
+# comprobación rápida: las filas deben sumar ~1
+
+head(rowSums(otu_df_rel_pimiento[ , -1]))
+if (!is.numeric(otu_df_rel_pimiento[,1])) ASV3_pimiento <- otu_df_rel_pimiento[,2:ncol(otu_df_rel_pimiento)] else  ASV3_pimiento <- otu_df_rel_pimiento[,1:ncol(otu_df_rel_pimiento)]  
+
+sum(ASV3_pimiento[1,]) 
+
+
+# Creación de variables
+
+yval_pimiento <- c(as.numeric(as.matrix(ASV3_pimiento[,])))
+species_pimiento <- as.factor(rep(1:ncol(ASV3_pimiento),each=11))
+plant_pimiento <- rep(1:11,ncol(ASV3_pimiento))
+trans.type_pimiento <- as.factor(1*(plant_pimiento<6)+1)  #5 primeras plantas de un tipo y las 6 segundas del otro
+plant_pimiento <- as.factor(plant_pimiento) 		# 1 para heteroespecífica, 2 para conespecífica
+
+
+	
+# Primera Fase: Presencia/Ausencia	
+
+above.zero_pimiento <- 1*(yval_pimiento!=0)
+d.brm_pimiento <- data.frame(above.zero=above.zero_pimiento,trans.type=trans.type_pimiento,species=species_pimiento,plant=plant_pimiento)
+
+fit0_pimiento <- brm(above.zero~(trans.type|species)+(1|plant), family=bernoulli,data=d.brm_pimiento,iter=8000) 
+
+
+contrasts(d.brm_pimiento$trans.type)
+
+
+# Extraer las pendientes y ordenarlas
+
+ran0_pimiento <- ranef(fit0_pimiento)  #fit0
+trans.species.effect_pimiento <- ran0_pimiento$species[,,"trans.type2"]
+o0_pimiento <- order(trans.species.effect_pimiento[,1])
+
+
+
+## Identificación de  ASVs relevantes
+
+species.that.colonize.worse_pimiento <- which(trans.species.effect_pimiento[,4]<0,arr.ind=TRUE)  #β < 0 => nivel "1" tiene menor respuesta que nivel "2"
+
+species.that.colonize.better_pimiento <- which(trans.species.effect_pimiento[,3]>0,arr.ind=TRUE) #β > 0 => nivel "1" tiene mayor respuesta que nivel "2"
+
+
+samps_pimiento <- sample_names(ps_Pimiento_6)
+plant_index_pimiento <- 1:length(samps_pimiento)
+data.frame(plant = plant_index_pimiento, Sample = samps_pimiento)
+
+
+
+colnames(ASV3_pimiento)[species.that.colonize.worse_pimiento]  # Mejor en las Heteroespecíficas
+colnames(ASV3_pimiento)[species.that.colonize.better_pimiento]  # Mejor en las conespecíficas
+
+
+idx_colonize_worse_pimiento <- as.integer(species.that.colonize.worse_pimiento)
+asv_colonize_worse_pimiento <- colnames(ASV3_pimiento)[ idx_colonize_worse_pimiento ]
+head(asv_colonize_worse_pimiento)
+
+
+idx_colonize_better_pimiento <- as.integer(species.that.colonize.better_pimiento)
+asv_colonize_better_pimiento <- colnames(ASV3_pimiento)[ idx_colonize_better_pimiento ]
+head(asv_colonize_better_pimiento)
+
+
+# Segunda Fase: relación de la abundancia con el modo de transmisión
+
+d.brm1_pimiento <- data.frame(yvalN=log(yval_pimiento),trans.typeN=trans.type_pimiento,speciesN=species_pimiento,plantN=plant_pimiento)
+d.brm1_pimiento <- d.brm1_pimiento[above.zero_pimiento==1,]
+cat("Filas (obs positivas):", nrow(d.brm1_pimiento), "\n")
+table(d.brm1_pimiento$trans.typeN)
+
+
+
+fit1_pimiento <- brm(yvalN~(trans.typeN|speciesN)+(1|plantN), data=d.brm1_pimiento,iter=8000) 
+
+# Extraer las pendientes y ordenarlas
+ran1_pimiento <- ranef(fit1_pimiento, summary = TRUE)
+trans.species.effect1_pimiento <- ran1_pimiento$speciesN[,,"trans.typeN2"]
+o1_pimiento <- order(trans.species.effect1_pimiento[,1])
+
+## identify relevant species (enriched species shown in Supplementary Table 1)
+species.that.ra.worse_pimiento <- which(trans.species.effect1_pimiento[,4]<0,arr.ind=TRUE) #Menos abundante en conespecifica, es deir, más abundante en Heteroespecífica 
+species.that.ra.better_pimiento <- which(trans.species.effect1_pimiento[,3]>0,arr.ind=TRUE) #Menos abundante en Heteroespecífica, más abundante en conespecífica 
+
+colnames(ASV3_pimiento)[species.that.ra.worse_pimiento] 
+colnames(ASV3_pimiento)[species.that.ra.better_pimiento]
+
+
+idx_ra_worse_pimiento <- as.integer(species.that.ra.worse_pimiento)
+asv_ra_worse_pimiento <- colnames(ASV3_pimiento)[ idx_ra_worse_pimiento ]
+head(asv_ra_worse_pimiento)
+
+
+idx_ra_better_pimiento <- as.integer(species.that.ra.better_pimiento)
+asv_ra_better_pimiento <- colnames(ASV3_pimiento)[ idx_ra_better_pimiento ]
+head(asv_ra_better_pimiento)
+
+
+
+# Definir vectores de ASVs
+presence_more_cone_pimiento   <- as.character(if (exists("asv_colonize_better_pimiento")) asv_colonize_better_pimiento else character(0))
+presence_more_hetero_pimiento <- as.character(if (exists("asv_colonize_worse_pimiento"))  asv_colonize_worse_pimiento  else character(0))
+abundance_more_cone_pimiento   <- as.character(if (exists("asv_ra_better_pimiento"))      asv_ra_better_pimiento      else character(0))
+abundance_more_hetero_pimiento <- as.character(if (exists("asv_ra_worse_pimiento"))             asv_ra_worse_pimiento             else character(0))
+
+# todas los ASVs que aparecen en alguna categoría (sin duplicados)
+all_asvs_pimiento <- sort(unique(c(presence_more_cone_pimiento, presence_more_hetero_pimiento, abundance_more_cone_pimiento, abundance_more_hetero_pimiento)))
+
+
+# construir data.frame con flags
+df_pimiento <- data.frame(
+  ASV = all_asvs_pimiento,
+  Presence_more_Conespecific_pimiento   = all_asvs_pimiento %in% presence_more_cone_pimiento,
+  Presence_more_heteroespecific_pimiento = all_asvs_pimiento %in% presence_more_hetero_pimiento,
+  Abundance_more_Conespecific_pimiento = all_asvs_pimiento %in% abundance_more_cone_pimiento,
+  Abundance_more_heteroespecific_pimiento = all_asvs_pimiento %in% abundance_more_hetero_pimiento,
+  stringsAsFactors = FALSE
+)
+
+# añadir taxonomía si existe el objeto phyloseq (ps_nocontrol_filtrado_rare) y tax_table
+if (exists("ps_nocontrol_filtrado_rare")) {
+  tt <- as.data.frame(tax_table(ps_nocontrol_filtrado_rare))
+df_pimiento$ASV <- as.character(df_pimiento$ASV)
+  tt$ASV_ID       <- as.character(tt$ASV_ID)
+
+  # unir por la columna ASV_ID en tt
+  idx_pimiento <- match(df_pimiento$ASV, tt$ASV_ID)
+
+  # función simple para limpiar prefijos tipo "f__", "g__", etc.
+  clean <- function(x) {
+    x <- as.character(x)
+    x[ x %in% c("", " ", "NA", NA) ] <- NA
+    x <- sub("^[a-z]__\\s*", "", x, ignore.case = TRUE)
+    x <- trimws(x)
+    x[ x == "" ] <- NA
+    x
+  }
+
+  df_pimiento$Family <- clean(tt$Family[idx_pimiento])
+  df_pimiento$Genus  <- clean(tt$Genus[idx_pimiento])
+
+  # aviso si hay ASVs sin unir
+  no_match <- df_pimiento$ASV[ is.na(idx_pimiento) ]
+  if (length(no_match) > 0) message("ASVs sin match en tt$ASV_ID: ", paste(head(no_match, 20), collapse = ", "))
+} else {
+  df_pimiento$Family <- NA
+  df_pimiento$Genus  <- NA
+}
+
+# guardar CSV
+outfile_pimiento <- "ASV_onefile_summary_pimiento.csv"
+write.csv(df_pimiento, outfile_pimiento, row.names = FALSE)
+cat("Wrote", outfile_pimiento, "with", nrow(df_pimiento), "rows\n")
+print(df_pimiento)
+
+
+
+
+```
+
+## Análisis Tomatillo {#Tomatillo}
+
+```{r}
+set.seed(134)
+
+# =============================================================================
+# Para Tomatillo
+# =============================================================================
+
+ps_Tomatillo_6  <- subset_samples(ps_nocontrol_filtrado_rare, Tipo_planta == "Tomatillo"  & Pase == 6)
+
+
+sd_Tomatillo <- as.data.frame(sample_data(ps_Tomatillo_6))
+
+
+ordered_samples_Tomatillo <- c(rownames(sd_Tomatillo)[sd_Tomatillo$Tipo_linea == "Conespecífica"],
+                     rownames(sd_Tomatillo)[sd_Tomatillo$Tipo_linea == "Heteroespecífica"],
+                     setdiff(rownames(sd_Tomatillo), rownames(sd_Tomatillo)[sd_Tomatillo$Tipo_linea %in% c("Conespecífica","Heteroespecífica")]))
+
+
+
+# 1) Reordenar sample_data
+
+sample_data(ps_Tomatillo_6) <- sample_data(sd_Tomatillo[ordered_samples_Tomatillo, , drop = FALSE])
+
+# 2) Reordenar la otu_table para que coincida
+if (taxa_are_rows(otu_table(ps_Tomatillo_6))) {
+  ot <- as(otu_table(ps_Tomatillo_6), "matrix")
+  ot <- ot[, ordered_samples_Tomatillo, drop = FALSE]
+  otu_table(ps_Tomatillo_6) <- otu_table(ot, taxa_are_rows = TRUE)
+} else {
+  ot <- as(otu_table(ps_Tomatillo_6), "matrix")
+  ot <- ot[ordered_samples_Tomatillo, , drop = FALSE]
+  otu_table(ps_Tomatillo_6) <- otu_table(ot, taxa_are_rows = FALSE)
+}
+
+# 3) Comprobar resultado
+cat("sample_names ahora:\n"); print(head(sample_names(ps_Tomatillo_6), 20))
+cat("Tabla Tipo_linea (orden en sample_data):\n"); print(table(as.character(sample_data(ps_Tomatillo_6)$Tipo_linea)))  
+  
+  
+rel_Tomatillo_6  <- rel_all[ match(sample_names(ps_Tomatillo_6), rownames(rel_all)), , drop = FALSE ]
+
+
+# mapear columnas de rel_Tomatillo_6 a ASV_ID 
+tt_orig <- as.data.frame(tax_table(ps_nocontrol_filtrado_rare))
+mapped_ids_rel_Tomatillo <- tt_orig$ASV_ID[ match(colnames(rel_Tomatillo_6), rownames(tt_orig)) ]
+if (any(is.na(mapped_ids_rel_Tomatillo))) stop("Error mapeando rel_Tomatillo_6 a tax_table.")
+colnames(rel_Tomatillo_6) <- mapped_ids_rel_Tomatillo
+
+# crear data.frame con relativas (SampleID + ASV1..ASVn)
+otu_df_rel_Tomatillo <- data.frame(SampleID = rownames(rel_Tomatillo_6), rel_Tomatillo_6, check.names = FALSE)
+
+
+# comprobación rápida: las filas deben sumar ~1
+head(rowSums(otu_df_rel_Tomatillo[ , -1]))
+
+if (!is.numeric(otu_df_rel_Tomatillo[,1])) ASV3_Tomatillo <- otu_df_rel_Tomatillo[,2:ncol(otu_df_rel_Tomatillo)] else  ASV3_Tomatillo <- otu_df_rel_Tomatillo[,1:ncol(otu_df_rel_Tomatillo)]  
+
+
+sum(ASV3_Tomatillo[1,]) 
+
+
+# Creación de variables
+yval_Tomatillo <- c(as.numeric(as.matrix(ASV3_Tomatillo[,])))
+species_Tomatillo <- as.factor(rep(1:ncol(ASV3_Tomatillo),each=12))
+plant_Tomatillo <- rep(1:12,ncol(ASV3_Tomatillo))
+trans.type_Tomatillo <- as.factor(1*(plant_Tomatillo<7)+1)  #6 primeras plantas de un tipo y las 6 segundas del otro
+plant_Tomatillo <- as.factor(plant_Tomatillo) 		# 1 para heteroespecífica, 2 para conespecífica
+
+
+# Primera Fase: Presencia/Ausencia	
+
+above.zero_Tomatillo <- 1*(yval_Tomatillo!=0)
+d.brm_Tomatillo <- data.frame(above.zero=above.zero_Tomatillo,trans.type=trans.type_Tomatillo,species=species_Tomatillo,plant=plant_Tomatillo)
+fit0_Tomatillo <- brm(above.zero~(trans.type|species)+(1|plant), family=bernoulli,data=d.brm_Tomatillo,iter=8000) 
+
+contrasts(d.brm_Tomatillo$trans.type)
+
+
+
+# Extraer las pendientes y ordenarlas
+
+ran0_Tomatillo <- ranef(fit0_Tomatillo)  #fit0
+trans.species.effect_Tomatillo <- ran0_Tomatillo$species[,,"trans.type2"]
+o0_Tomatillo <- order(trans.species.effect_Tomatillo[,1])
+
+
+
+## Identificación de ASVs relevantes
+
+species.that.colonize.worse_Tomatillo <- which(trans.species.effect_Tomatillo[,4]<0,arr.ind=TRUE)  #β < 0 => nivel "1" tiene menor respuesta que nivel "2"
+species.that.colonize.better_Tomatillo <- which(trans.species.effect_Tomatillo[,3]>0,arr.ind=TRUE) #β > 0 => nivel "1" tiene mayor respuesta que nivel "2"
+
+
+samps_Tomatillo <- sample_names(ps_Tomatillo_6)
+plant_index_Tomatillo <- 1:length(samps_Tomatillo)
+data.frame(plant = plant_index_Tomatillo, Sample = samps_Tomatillo)
+
+
+colnames(ASV3_Tomatillo)[species.that.colonize.worse_Tomatillo]  #Mejor en las Heteroespecíficas
+colnames(ASV3_Tomatillo)[species.that.colonize.better_Tomatillo]  #Mejor en las conespecíficas
+
+
+idx_colonize_worse_Tomatillo <- as.integer(species.that.colonize.worse_Tomatillo)
+asv_colonize_worse_Tomatillo <- colnames(ASV3_Tomatillo)[ idx_colonize_worse_Tomatillo ]
+head(asv_colonize_worse_Tomatillo)
+
+
+idx_colonize_better_Tomatillo <- as.integer(species.that.colonize.better_Tomatillo)
+asv_colonize_better_Tomatillo <- colnames(ASV3_Tomatillo)[ idx_colonize_better_Tomatillo ]
+head(asv_colonize_better_Tomatillo)
+
+
+
+# Segunda Fase: relación de la abundancia con el modo de transmisión
+
+d.brm1_Tomatillo <- data.frame(yvalN=log(yval_Tomatillo),trans.typeN=trans.type_Tomatillo,speciesN=species_Tomatillo,plantN=plant_Tomatillo)
+d.brm1_Tomatillo <- d.brm1_Tomatillo[above.zero_Tomatillo==1,]
+cat("Filas (obs positivas):", nrow(d.brm1_Tomatillo), "\n")
+table(d.brm1_Tomatillo$trans.typeN)
+fit1_Tomatillo <- brm(yvalN~(trans.typeN|speciesN)+(1|plantN), data=d.brm1_Tomatillo,iter=8000) 
+
+
+# Extraer las pendientes y ordenarlas 
+ran1_Tomatillo <- ranef(fit1_Tomatillo, summary = TRUE)
+trans.species.effect1_Tomatillo <- ran1_Tomatillo$speciesN[,,"trans.typeN2"]
+o1_Tomatillo <- order(trans.species.effect1_Tomatillo[,1])
+
+
+## Identificación de ASVs relevantes
+
+species.that.ra.worse_Tomatillo <- which(trans.species.effect1_Tomatillo[,4]<0,arr.ind=TRUE) #Menos abundante en conespecifica, es deir, más abundante en Heteroespecífica 
+species.that.ra.better_Tomatillo <- which(trans.species.effect1_Tomatillo[,3]>0,arr.ind=TRUE) #Menos abundante en Heteroespecífica, más abundante en conespecífica 
+
+colnames(ASV3_Tomatillo)[species.that.ra.worse_Tomatillo] 
+colnames(ASV3_Tomatillo)[species.that.ra.better_Tomatillo]
+
+
+idx_ra_worse_Tomatillo <- as.integer(species.that.ra.worse_Tomatillo)
+asv_ra_worse_Tomatillo <- colnames(ASV3_Tomatillo)[ idx_ra_worse_Tomatillo ]
+head(asv_ra_worse_Tomatillo)
+
+
+idx_ra_better_Tomatillo <- as.integer(species.that.ra.better_Tomatillo)
+asv_ra_better_Tomatillo <- colnames(ASV3_Tomatillo)[ idx_ra_better_Tomatillo ]
+head(asv_ra_better_Tomatillo)
+
+
+#  Definir vectores de ASVs 
+presence_more_cone_Tomatillo   <- as.character(if (exists("asv_colonize_better_Tomatillo")) asv_colonize_better_Tomatillo else character(0))
+presence_more_hetero_Tomatillo <- as.character(if (exists("asv_colonize_worse_Tomatillo"))  asv_colonize_worse_Tomatillo  else character(0))
+abundance_more_cone_Tomatillo   <- as.character(if (exists("asv_ra_better_Tomatillo"))      asv_ra_better_Tomatillo      else character(0))
+abundance_more_hetero_Tomatillo <- as.character(if (exists("asv_ra_worse_Tomatillo"))             asv_ra_worse_Tomatillo             else character(0))
+
+
+# todas los ASVs que aparecen en alguna categoría (sin duplicados)
+
+all_asvs_Tomatillo <- sort(unique(c(presence_more_cone_Tomatillo, presence_more_hetero_Tomatillo, abundance_more_cone_Tomatillo, abundance_more_hetero_Tomatillo)))
+
+
+# construir data.frame
+
+df_Tomatillo <- data.frame(
+  ASV = all_asvs_Tomatillo,
+  Presence_more_Conespecific_Tomatillo   = all_asvs_Tomatillo %in% presence_more_cone_Tomatillo,
+  Presence_more_heteroespecific_Tomatillo = all_asvs_Tomatillo %in% presence_more_hetero_Tomatillo,
+  Abundance_more_Conespecific_Tomatillo = all_asvs_Tomatillo %in% abundance_more_cone_Tomatillo,
+  Abundance_more_heteroespecific_Tomatillo = all_asvs_Tomatillo %in% abundance_more_hetero_Tomatillo,
+  stringsAsFactors = FALSE
+)
+
+# añadir taxonomía si existe el objeto phyloseq (ps_nocontrol_filtrado_rare) y tax_table
+
+if (exists("ps_nocontrol_filtrado_rare")) {
+  tt <- as.data.frame(tax_table(ps_nocontrol_filtrado_rare))
+df_Tomatillo$ASV <- as.character(df_Tomatillo$ASV)
+  tt$ASV_ID       <- as.character(tt$ASV_ID)
+
+  # unir por la columna ASV_ID en tt
+  idx_Tomatillo <- match(df_Tomatillo$ASV, tt$ASV_ID)
+
+  # función simple para limpiar prefijos tipo "f__", "g__", etc.
+  clean <- function(x) {
+    x <- as.character(x)
+    x[ x %in% c("", " ", "NA", NA) ] <- NA
+    x <- sub("^[a-z]__\\s*", "", x, ignore.case = TRUE)
+    x <- trimws(x)
+    x[ x == "" ] <- NA
+    x
+  }
+
+  df_Tomatillo$Family <- clean(tt$Family[idx_Tomatillo])
+  df_Tomatillo$Genus  <- clean(tt$Genus[idx_Tomatillo])
+
+  # aviso si hay ASVs sin unir
+  no_match <- df_Tomatillo$ASV[ is.na(idx_Tomatillo) ]
+  if (length(no_match) > 0) message("ASVs sin match en tt$ASV_ID: ", paste(head(no_match, 20), collapse = ", "))
+} else {
+  df_Tomatillo$Family <- NA
+  df_Tomatillo$Genus  <- NA
+}
+
+# guardar CSV
+outfile_Tomatillo <- "ASV_onefile_summary_Tomatillo.csv"
+write.csv(df_Tomatillo, outfile_Tomatillo, row.names = FALSE)
+cat("Wrote", outfile_Tomatillo, "with", nrow(df_Tomatillo), "rows\n")
+print(df_Tomatillo)
+
+
+```
+
+## Análisis Guisante - Tomate {#Guisante-Tomate}
+
+```{r}
+set.seed(134)
+
+
+# =============================================================================
+# Para Guisante - Tomate
+# =============================================================================
+
+ps_Guisante_Tomate_6 <- subset_samples(ps_nocontrol_filtrado_rare,
+    ((Tipo_planta == "Guisante" & Tipo_linea == "Heteroespecífica") |
+     (Tipo_planta == "Tomate"   & Tipo_linea == "Conespecífica")) &
+     Pase == 6)
+
+
+sd_Guisante_Tomate_6 <- as.data.frame(sample_data(ps_Guisante_Tomate_6))
+
+
+ordered_samples_Guisante_Tomate_6 <- c(rownames(sd_Guisante_Tomate_6)[sd_Guisante_Tomate_6$Tipo_linea == "Conespecífica"],
+                     rownames(sd_Guisante_Tomate_6)[sd_Guisante_Tomate_6$Tipo_linea == "Heteroespecífica"],
+                     setdiff(rownames(sd_Guisante_Tomate_6), rownames(sd_Guisante_Tomate_6)[sd_Guisante_Tomate_6$Tipo_linea %in% c("Conespecífica","Heteroespecífica")]))
+
+
+
+# 1) Reordenar sample_data
+
+sample_data(ps_Guisante_Tomate_6) <- sample_data(sd_Guisante_Tomate_6[ordered_samples_Guisante_Tomate_6, , drop = FALSE])
+
+# 2) Reordenar la otu_table para que coincida 
+if (taxa_are_rows(otu_table(ps_Guisante_Tomate_6))) {
+  ot <- as(otu_table(ps_Guisante_Tomate_6), "matrix")
+  ot <- ot[, ordered_samples_Guisante_Tomate_6, drop = FALSE]
+  otu_table(ps_Guisante_Tomate_6) <- otu_table(ot, taxa_are_rows = TRUE)
+} else {
+  ot <- as(otu_table(ps_Guisante_Tomate_6), "matrix")
+  ot <- ot[ordered_samples_Guisante_Tomate_6, , drop = FALSE]
+  otu_table(ps_Guisante_Tomate_6) <- otu_table(ot, taxa_are_rows = FALSE)
+}
+
+
+# 3) Comprobar resultado
+cat("sample_names ahora:\n"); print(head(sample_names(ps_Guisante_Tomate_6), 20))
+cat("Tabla Tipo_linea (orden en sample_data):\n"); print(table(as.character(sample_data(ps_Guisante_Tomate_6)$Tipo_linea)))  
+  
+  
+
+rel_Guisante_Tomate_6  <- rel_all[ match(sample_names(ps_Guisante_Tomate_6), rownames(rel_all)), , drop = FALSE ]
+
+# mapear columnas de rel_Guisante_Tomate_6  a ASV_ID 
+
+tt_orig <- as.data.frame(tax_table(ps_nocontrol_filtrado_rare))
+mapped_ids_rel_Guisante_Tomate_6  <- tt_orig$ASV_ID[ match(colnames(rel_Guisante_Tomate_6), rownames(tt_orig)) ]
+if (any(is.na(mapped_ids_rel_Guisante_Tomate_6))) stop("Error mapeando rel_Guisante_Tomate_6 a tax_table.")
+colnames(rel_Guisante_Tomate_6) <- mapped_ids_rel_Guisante_Tomate_6
+
+# crear data.frame con relativas (SampleID + ASV1..ASVn)
+
+otu_df_rel_Guisante_Tomate_6 <- data.frame(SampleID = rownames(rel_Guisante_Tomate_6), rel_Guisante_Tomate_6, check.names = FALSE)
+
+
+
+# comprobación rápida: las filas deben sumar ~1
+
+head(rowSums(otu_df_rel_Guisante_Tomate_6[ , -1]))
+
+if (!is.numeric(otu_df_rel_Guisante_Tomate_6[,1])) ASV3_Guisante_Tomate_6 <- otu_df_rel_Guisante_Tomate_6[,2:ncol(otu_df_rel_Guisante_Tomate_6)] else  ASV3_Guisante_Tomate_6 <- otu_df_rel_Guisante_Tomate_6[,1:ncol(otu_df_rel_Guisante_Tomate_6)]  
+
+
+sum(ASV3_Guisante_Tomate_6[1,]) 
+
+
+# Creación de variables
+
+yval_Guisante_Tomate_6<- c(as.numeric(as.matrix(ASV3_Guisante_Tomate_6[,])))
+species_Guisante_Tomate_6 <- as.factor(rep(1:ncol(ASV3_Guisante_Tomate_6),each=11))
+plant_Guisante_Tomate_6 <- rep(1:11,ncol(ASV3_Guisante_Tomate_6))
+trans.type_Guisante_Tomate_6 <- as.factor(1*(plant_Guisante_Tomate_6<7)+1)  #6 primeras plantas de un tipo y las 5 segundas del otro
+plant_Guisante_Tomate_6 <- as.factor(plant_Guisante_Tomate_6) 		# 1 para heteroespecífica, 2 para conespecífica
+
+data.frame(
+  sample = rownames(ASV3_Guisante_Tomate_6),
+  Tipo_linea = as.character(sample_data(ps_Guisante_Tomate_6)$Tipo_linea),
+  trans = trans.type_Guisante_Tomate_6[1:nrow(ASV3_Guisante_Tomate_6)]
+)
+
+# Primera Fase: Presencia/Ausencia
+
+above.zero_Guisante_Tomate_6 <- 1*(yval_Guisante_Tomate_6!=0)
+d.brm_Guisante_Tomate_6 <- data.frame(above.zero=above.zero_Guisante_Tomate_6,trans.type=trans.type_Guisante_Tomate_6,species=species_Guisante_Tomate_6,plant=plant_Guisante_Tomate_6)
+fit0_Guisante_Tomate_6 <- brm(above.zero~(trans.type|species)+(1|plant), family=bernoulli,data=d.brm_Guisante_Tomate_6,iter=8000) 
+contrasts(d.brm_Guisante_Tomate_6$trans.type)
+
+
+# Extraer las pendientes y ordenarlas
+
+ran0_Guisante_Tomate_6 <- ranef(fit0_Guisante_Tomate_6)  
+trans.species.effect_Guisante_Tomate_6 <- ran0_Guisante_Tomate_6$species[,,"trans.type2"]
+o0_Guisante_Tomate_6 <- order(trans.species.effect_Guisante_Tomate_6[,1])
+
+
+## Identificación de ASVs relevantes
+
+species.that.colonize.worse_Guisante_Tomate_6 <- which(trans.species.effect_Guisante_Tomate_6[,4]<0,arr.ind=TRUE)  #β < 0 => nivel "1" tiene menor respuesta que nivel "2"
+
+species.that.colonize.better_Guisante_Tomate_6 <- which(trans.species.effect_Guisante_Tomate_6[,3]>0,arr.ind=TRUE) #β > 0 => nivel "1" tiene mayor respuesta que nivel "2"
+
+
+samps_Guisante_Tomate_6 <- sample_names(ps_Guisante_Tomate_6)
+plant_index_Guisante_Tomate_6<- 1:length(samps_Guisante_Tomate_6)
+data.frame(plant = plant_index_Guisante_Tomate_6, Sample = samps_Guisante_Tomate_6)
+
+
+colnames(ASV3_Guisante_Tomate_6)[species.that.colonize.worse_Guisante_Tomate_6]  #Mejor en las Heteroespecíficas
+colnames(ASV3_Guisante_Tomate_6)[species.that.colonize.better_Guisante_Tomate_6]  #Mejor en las conespecíficas
+
+
+idx_colonize_worse_Guisante_Tomate_6 <- as.integer(species.that.colonize.worse_Guisante_Tomate_6)
+asv_colonize_worse_Guisante_Tomate_6 <- colnames(ASV3_Guisante_Tomate_6)[ idx_colonize_worse_Guisante_Tomate_6 ]
+head(asv_colonize_worse_Guisante_Tomate_6)
+
+
+idx_colonize_better_Guisante_Tomate_6 <- as.integer(species.that.colonize.better_Guisante_Tomate_6)
+asv_colonize_better_Guisante_Tomate_6 <- colnames(ASV3_Guisante_Tomate_6)[ idx_colonize_better_Guisante_Tomate_6 ]
+head(asv_colonize_better_Guisante_Tomate_6)
+
+
+# Segunda Fase: relación de la abundancia con el modo de transmisión
+
+d.brm1_Guisante_Tomate_6 <- data.frame(yvalN=log(yval_Guisante_Tomate_6),trans.typeN=trans.type_Guisante_Tomate_6,speciesN=species_Guisante_Tomate_6,plantN=plant_Guisante_Tomate_6)
+d.brm1_Guisante_Tomate_6 <- d.brm1_Guisante_Tomate_6[above.zero_Guisante_Tomate_6==1,]
+cat("Filas (obs positivas):", nrow(d.brm1_Guisante_Tomate_6), "\n")
+table(d.brm1_Guisante_Tomate_6$trans.typeN)
+fit1_Guisante_Tomate_6<- brm(yvalN~(trans.typeN|speciesN)+(1|plantN), data=d.brm1_Guisante_Tomate_6,iter=8000) 
+
+
+# Extraer las pendientes y ordenarlas 
+
+ran1_Guisante_Tomate_6 <- ranef(fit1_Guisante_Tomate_6, summary = TRUE)
+trans.species.effect1_Guisante_Tomate_6 <- ran1_Guisante_Tomate_6$speciesN[,,"trans.typeN2"]
+o1_Guisante_Tomate_6 <- order(trans.species.effect1_Guisante_Tomate_6[,1])
+
+
+## Identificación de ASVs relevantes
+
+species.that.ra.worse_Guisante_Tomate_6 <- which(trans.species.effect1_Guisante_Tomate_6[,4]<0,arr.ind=TRUE) #Menos abundante en conespecifica
+species.that.ra.better_Guisante_Tomate_6 <- which(trans.species.effect1_Guisante_Tomate_6[,3]>0,arr.ind=TRUE) #Menos abundante en Heteroespecífica
+
+colnames(ASV3_Guisante_Tomate_6)[species.that.ra.worse_Guisante_Tomate_6] 
+colnames(ASV3_Guisante_Tomate_6)[species.that.ra.better_Guisante_Tomate_6]
+
+
+idx_ra_worse_Guisante_Tomate_6 <- as.integer(species.that.ra.worse_Guisante_Tomate_6)
+asv_ra_worse_Guisante_Tomate_6 <- colnames(ASV3_Guisante_Tomate_6)[ idx_ra_worse_Guisante_Tomate_6 ]
+head(asv_ra_worse_Guisante_Tomate_6)
+
+
+idx_ra_better_Guisante_Tomate_6 <- as.integer(species.that.ra.better_Guisante_Tomate_6)
+asv_ra_better_Guisante_Tomate_6 <- colnames(ASV3_Guisante_Tomate_6)[ idx_ra_better_Guisante_Tomate_6 ]
+head(asv_ra_better_Guisante_Tomate_6)
+
+
+# Definir vectores de ASVs
+presence_more_cone_Guisante_Tomate_6   <- as.character(if (exists("asv_colonize_better_Guisante_Tomate_6")) asv_colonize_better_Guisante_Tomate_6 else character(0))
+presence_more_hetero_Guisante_Tomate_6 <- as.character(if (exists("asv_colonize_worse_Guisante_Tomate_6"))  asv_colonize_worse_Guisante_Tomate_6  else character(0))
+abundance_more_cone_Guisante_Tomate_6   <- as.character(if (exists("asv_ra_better_Guisante_Tomate_6"))      asv_ra_better_Guisante_Tomate_6      else character(0))
+abundance_more_hetero_Guisante_Tomate_6 <- as.character(if (exists("asv_ra_worse_Guisante_Tomate_6"))             asv_ra_worse_Guisante_Tomate_6             else character(0))
+
+# todas los ASVs que aparecen en alguna categoría (sin duplicados)
+all_asvs_Guisante_Tomate_6 <- sort(unique(c(presence_more_cone_Guisante_Tomate_6, presence_more_hetero_Guisante_Tomate_6, abundance_more_cone_Guisante_Tomate_6, abundance_more_hetero_Guisante_Tomate_6)))
+
+
+# construir data.frame 
+
+df_Guisante_Tomate_6 <- data.frame(
+  ASV = all_asvs_Guisante_Tomate_6,
+  Presence_more_Conespecific_Guisante_Tomate_6   = all_asvs_Guisante_Tomate_6 %in% presence_more_cone_Guisante_Tomate_6,
+  Presence_more_heteroespecific_Guisante_Tomate_6 = all_asvs_Guisante_Tomate_6 %in% presence_more_hetero_Guisante_Tomate_6,
+  Abundance_more_Conespecific_Guisante_Tomate_6 = all_asvs_Guisante_Tomate_6 %in% abundance_more_cone_Guisante_Tomate_6,
+  Abundance_more_heteroespecific_Guisante_Tomate_6 = all_asvs_Guisante_Tomate_6 %in% abundance_more_hetero_Guisante_Tomate_6,
+  stringsAsFactors = FALSE
+)
+
+# añadir taxonomía si existe el objeto phyloseq (ps_nocontrol_filtrado_rare) y tax_table
+
+if (exists("ps_nocontrol_filtrado_rare")) {
+  tt <- as.data.frame(tax_table(ps_nocontrol_filtrado_rare))
+df_Guisante_Tomate_6$ASV <- as.character(df_Guisante_Tomate_6$ASV)
+  tt$ASV_ID       <- as.character(tt$ASV_ID)
+
+  # unir por la columna ASV_ID en tt
+  idx_Guisante_Tomate_6 <- match(df_Guisante_Tomate_6$ASV, tt$ASV_ID)
+
+  # función simple para limpiar prefijos tipo "f__", "g__", etc.
+  clean <- function(x) {
+    x <- as.character(x)
+    x[ x %in% c("", " ", "NA", NA) ] <- NA
+    x <- sub("^[a-z]__\\s*", "", x, ignore.case = TRUE)
+    x <- trimws(x)
+    x[ x == "" ] <- NA
+    x
+  }
+
+  df_Guisante_Tomate_6$Family <- clean(tt$Family[idx_Guisante_Tomate_6])
+  df_Guisante_Tomate_6$Genus  <- clean(tt$Genus[idx_Guisante_Tomate_6])
+
+  # aviso si hay ASVs sin unir
+  
+  no_match <- df_Guisante_Tomate_6$ASV[ is.na(idx_Guisante_Tomate_6) ]
+  if (length(no_match) > 0) message("ASVs sin match en tt$ASV_ID: ", paste(head(no_match, 20), collapse = ", "))
+} else {
+  df_Guisante_Tomate_6$Family <- NA
+  df_Guisante_Tomate_6$Genus  <- NA
+}
+
+# guardar CSV
+
+outfile_Guisante_Tomate_6 <- "ASV_onefile_summary_Guisante_Tomate_6.csv"
+write.csv(df_Guisante_Tomate_6, outfile_Guisante_Tomate_6, row.names = FALSE)
+cat("Wrote", outfile_Guisante_Tomate_6, "with", nrow(df_Guisante_Tomate_6), "rows\n")
+print(df_Guisante_Tomate_6)
+
+
+```
+
+## Análisis Pimiento - Tomate {#Pimiento-Tomate}
+
+```{r}
+
+set.seed(134)
+
+# =============================================================================
+# Para Pimiento - Tomate
+# =============================================================================
+
+ps_Pimiento_Tomate_6 <- subset_samples(ps_nocontrol_filtrado_rare,
+    ((Tipo_planta == "Pimiento" & Tipo_linea == "Heteroespecífica") |
+     (Tipo_planta == "Tomate"   & Tipo_linea == "Conespecífica")) &
+     Pase == 6)
+
+sd_Pimiento_Tomate_6 <- as.data.frame(sample_data(ps_Pimiento_Tomate_6))
+
+
+ordered_samples_Pimiento_Tomate_6 <- c(rownames(sd_Pimiento_Tomate_6)[sd_Pimiento_Tomate_6$Tipo_linea == "Conespecífica"],
+                     rownames(sd_Pimiento_Tomate_6)[sd_Pimiento_Tomate_6$Tipo_linea == "Heteroespecífica"],
+                     setdiff(rownames(sd_Pimiento_Tomate_6), rownames(sd_Pimiento_Tomate_6)[sd_Pimiento_Tomate_6$Tipo_linea %in% c("Conespecífica","Heteroespecífica")]))
+
+
+
+# 1) Reordenar sample_data
+
+sample_data(ps_Pimiento_Tomate_6) <- sample_data(sd_Pimiento_Tomate_6[ordered_samples_Pimiento_Tomate_6, , drop = FALSE])
+
+# 2) Reordenar la otu_table para que coincida 
+
+if (taxa_are_rows(otu_table(ps_Pimiento_Tomate_6))) {
+  # muestras están en columnas -> reordenar columnas
+  ot <- as(otu_table(ps_Pimiento_Tomate_6), "matrix")
+  ot <- ot[, ordered_samples_Pimiento_Tomate_6, drop = FALSE]
+  otu_table(ps_Pimiento_Tomate_6) <- otu_table(ot, taxa_are_rows = TRUE)
+} else {
+  # muestras están en filas -> reordenar filas
+  ot <- as(otu_table(ps_Pimiento_Tomate_6), "matrix")
+  ot <- ot[ordered_samples_Pimiento_Tomate_6, , drop = FALSE]
+  otu_table(ps_Pimiento_Tomate_6) <- otu_table(ot, taxa_are_rows = FALSE)
+}
+
+# 3) Comprobar resultado
+
+cat("sample_names ahora:\n"); print(head(sample_names(ps_Pimiento_Tomate_6), 20))
+cat("Tabla Tipo_linea (orden en sample_data):\n"); print(table(as.character(sample_data(ps_Pimiento_Tomate_6)$Tipo_linea)))  
+  
+  
+rel_Pimiento_Tomate_6  <- rel_all[ match(sample_names(ps_Pimiento_Tomate_6), rownames(rel_all)), , drop = FALSE ]
+
+
+# mapear columnas de rel_Pimiento_Tomate_6  a ASV_ID 
+
+tt_orig <- as.data.frame(tax_table(ps_nocontrol_filtrado_rare))
+mapped_ids_rel_Pimiento_Tomate_6  <- tt_orig$ASV_ID[ match(colnames(rel_Pimiento_Tomate_6), rownames(tt_orig)) ]
+if (any(is.na(mapped_ids_rel_Pimiento_Tomate_6))) stop("Error mapeando rel_Pimiento_Tomate_6 a tax_table.")
+colnames(rel_Pimiento_Tomate_6) <- mapped_ids_rel_Pimiento_Tomate_6
+
+# crear data.frame con relativas (SampleID + ASV1..ASVn)
+
+otu_df_rel_Pimiento_Tomate_6 <- data.frame(SampleID = rownames(rel_Pimiento_Tomate_6), rel_Pimiento_Tomate_6, check.names = FALSE)
+
+
+
+# comprobación rápida: las filas deben sumar ~1
+head(rowSums(otu_df_rel_Pimiento_Tomate_6[ , -1]))
+
+if (!is.numeric(otu_df_rel_Pimiento_Tomate_6[,1])) ASV3_Pimiento_Tomate_6 <- otu_df_rel_Pimiento_Tomate_6[,2:ncol(otu_df_rel_Pimiento_Tomate_6)] else  ASV3_Pimiento_Tomate_6 <- otu_df_rel_Pimiento_Tomate_6[,1:ncol(otu_df_rel_Pimiento_Tomate_6)]  
+
+sum(ASV3_Pimiento_Tomate_6[1,]) 
+
+
+# Creación de variables
+
+yval_Pimiento_Tomate_6<- c(as.numeric(as.matrix(ASV3_Pimiento_Tomate_6[,])))
+species_Pimiento_Tomate_6 <- as.factor(rep(1:ncol(ASV3_Pimiento_Tomate_6),each=12))
+plant_Pimiento_Tomate_6 <- rep(1:12,ncol(ASV3_Pimiento_Tomate_6))
+trans.type_Pimiento_Tomate_6 <- as.factor(1*(plant_Pimiento_Tomate_6<7)+1)  #6 primeras plantas de un tipo y las 6 segundas del otro
+plant_Pimiento_Tomate_6 <- as.factor(plant_Pimiento_Tomate_6) 		# 1 para heteroespecífica, 2 para conespecífica
+
+
+# Primera Fase: Presencia/Ausencia	
+
+above.zero_Pimiento_Tomate_6 <- 1*(yval_Pimiento_Tomate_6!=0)
+d.brm_Pimiento_Tomate_6 <- data.frame(above.zero=above.zero_Pimiento_Tomate_6,trans.type=trans.type_Pimiento_Tomate_6,species=species_Pimiento_Tomate_6,plant=plant_Pimiento_Tomate_6)
+fit0_Pimiento_Tomate_6 <- brm(above.zero~(trans.type|species)+(1|plant), family=bernoulli,data=d.brm_Pimiento_Tomate_6,iter=8000) 
+contrasts(d.brm_Pimiento_Tomate_6$trans.type)
+
+
+# Extraer las pendientes y ordenarlas
+
+ran0_Pimiento_Tomate_6 <- ranef(fit0_Pimiento_Tomate_6)  #fit0
+trans.species.effect_Pimiento_Tomate_6 <- ran0_Pimiento_Tomate_6$species[,,"trans.type2"]
+o0_Pimiento_Tomate_6 <- order(trans.species.effect_Pimiento_Tomate_6[,1])
+
+
+## Identificación de ASVs relevantes
+
+species.that.colonize.worse_Pimiento_Tomate_6 <- which(trans.species.effect_Pimiento_Tomate_6[,4]<0,arr.ind=TRUE)  #β < 0 => nivel "1" tiene menor respuesta que nivel "2"
+
+species.that.colonize.better_Pimiento_Tomate_6 <- which(trans.species.effect_Pimiento_Tomate_6[,3]>0,arr.ind=TRUE) #β > 0 => nivel "1" tiene mayor respuesta que nivel "2"
+
+
+samps_Pimiento_Tomate_6 <- sample_names(ps_Pimiento_Tomate_6)
+plant_index_Pimiento_Tomate_6<- 1:length(samps_Pimiento_Tomate_6)
+data.frame(plant = plant_index_Pimiento_Tomate_6, Sample = samps_Pimiento_Tomate_6)
+
+
+
+colnames(ASV3_Pimiento_Tomate_6)[species.that.colonize.worse_Pimiento_Tomate_6]  #Mejor en las Heteroespecíficas
+colnames(ASV3_Pimiento_Tomate_6)[species.that.colonize.better_Pimiento_Tomate_6]  #Mejor en las conespecíficas
+
+
+idx_colonize_worse_Pimiento_Tomate_6 <- as.integer(species.that.colonize.worse_Pimiento_Tomate_6)
+asv_colonize_worse_Pimiento_Tomate_6 <- colnames(ASV3_Pimiento_Tomate_6)[ idx_colonize_worse_Pimiento_Tomate_6 ]
+head(asv_colonize_worse_Pimiento_Tomate_6)
+
+
+idx_colonize_better_Pimiento_Tomate_6 <- as.integer(species.that.colonize.better_Pimiento_Tomate_6)
+asv_colonize_better_Pimiento_Tomate_6 <- colnames(ASV3_Pimiento_Tomate_6)[ idx_colonize_better_Pimiento_Tomate_6 ]
+head(asv_colonize_better_Pimiento_Tomate_6)
+
+
+# Segunda Fase: relación de la abundancia con el modo de transmisión
+
+d.brm1_Pimiento_Tomate_6 <- data.frame(yvalN=log(yval_Pimiento_Tomate_6),trans.typeN=trans.type_Pimiento_Tomate_6,speciesN=species_Pimiento_Tomate_6,plantN=plant_Pimiento_Tomate_6)
+d.brm1_Pimiento_Tomate_6 <- d.brm1_Pimiento_Tomate_6[above.zero_Pimiento_Tomate_6==1,]
+cat("Filas (obs positivas):", nrow(d.brm1_Pimiento_Tomate_6), "\n")
+table(d.brm1_Pimiento_Tomate_6$trans.typeN)
+ 
+
+fit1_Pimiento_Tomate_6  <- brm(yvalN~(trans.typeN|speciesN)+(1|plantN), data=d.brm1_Pimiento_Tomate_6,iter=8000) 
+
+# Extraer las pendientes y ordenarlas 
+
+ran1_Pimiento_Tomate_6 <- ranef(fit1_Pimiento_Tomate_6, summary = TRUE)
+trans.species.effect1_Pimiento_Tomate_6 <- ran1_Pimiento_Tomate_6$speciesN[,,"trans.typeN2"]
+o1_Pimiento_Tomate_6 <- order(trans.species.effect1_Pimiento_Tomate_6[,1])
+
+## Identificación de ASVs relevantes
+
+species.that.ra.worse_Pimiento_Tomate_6 <- which(trans.species.effect1_Pimiento_Tomate_6[,4]<0,arr.ind=TRUE) #Menos abundante en conespecifica
+species.that.ra.better_Pimiento_Tomate_6 <- which(trans.species.effect1_Pimiento_Tomate_6[,3]>0,arr.ind=TRUE) #Menos abundante en Heteroespecífica
+
+colnames(ASV3_Pimiento_Tomate_6)[species.that.ra.worse_Pimiento_Tomate_6] 
+colnames(ASV3_Pimiento_Tomate_6)[species.that.ra.better_Pimiento_Tomate_6]
+
+
+idx_ra_worse_Pimiento_Tomate_6 <- as.integer(species.that.ra.worse_Pimiento_Tomate_6)
+asv_ra_worse_Pimiento_Tomate_6 <- colnames(ASV3_Pimiento_Tomate_6)[ idx_ra_worse_Pimiento_Tomate_6 ]
+head(asv_ra_worse_Pimiento_Tomate_6)
+
+
+idx_ra_better_Pimiento_Tomate_6 <- as.integer(species.that.ra.better_Pimiento_Tomate_6)
+asv_ra_better_Pimiento_Tomate_6 <- colnames(ASV3_Pimiento_Tomate_6)[ idx_ra_better_Pimiento_Tomate_6 ]
+head(asv_ra_better_Pimiento_Tomate_6)
+
+
+# Definir vectores de ASVs
+presence_more_cone_Pimiento_Tomate_6   <- as.character(if (exists("asv_colonize_better_Pimiento_Tomate_6")) asv_colonize_better_Pimiento_Tomate_6 else character(0))
+presence_more_hetero_Pimiento_Tomate_6 <- as.character(if (exists("asv_colonize_worse_Pimiento_Tomate_6"))  asv_colonize_worse_Pimiento_Tomate_6  else character(0))
+abundance_more_cone_Pimiento_Tomate_6   <- as.character(if (exists("asv_ra_better_Pimiento_Tomate_6"))      asv_ra_better_Pimiento_Tomate_6      else character(0))
+abundance_more_hetero_Pimiento_Tomate_6 <- as.character(if (exists("asv_ra_worse_Pimiento_Tomate_6"))             asv_ra_worse_Pimiento_Tomate_6             else character(0))
+
+# todas los ASVs que aparecen en alguna categoría (sin duplicados)
+
+all_asvs_Pimiento_Tomate_6 <- sort(unique(c(presence_more_cone_Pimiento_Tomate_6, presence_more_hetero_Pimiento_Tomate_6, abundance_more_cone_Pimiento_Tomate_6, abundance_more_hetero_Pimiento_Tomate_6)))
+
+
+# construir data.frame
+
+df_Pimiento_Tomate_6 <- data.frame(
+  ASV = all_asvs_Pimiento_Tomate_6,
+  Presence_more_Conespecific_Pimiento_Tomate_6   = all_asvs_Pimiento_Tomate_6 %in% presence_more_cone_Pimiento_Tomate_6,
+  Presence_more_heteroespecific_Pimiento_Tomate_6 = all_asvs_Pimiento_Tomate_6 %in% presence_more_hetero_Pimiento_Tomate_6,
+  Abundance_more_Conespecific_Pimiento_Tomate_6 = all_asvs_Pimiento_Tomate_6 %in% abundance_more_cone_Pimiento_Tomate_6,
+  Abundance_more_heteroespecific_Pimiento_Tomate_6 = all_asvs_Pimiento_Tomate_6 %in% abundance_more_hetero_Pimiento_Tomate_6,
+  stringsAsFactors = FALSE
+)
+
+# añadir taxonomía si existe el objeto phyloseq (ps_nocontrol_filtrado_rare) y tax_table
+
+if (exists("ps_nocontrol_filtrado_rare")) {
+  tt <- as.data.frame(tax_table(ps_nocontrol_filtrado_rare))
+df_Pimiento_Tomate_6$ASV <- as.character(df_Pimiento_Tomate_6$ASV)
+  tt$ASV_ID       <- as.character(tt$ASV_ID)
+
+  # unir por la columna ASV_ID en tt
+  idx_Pimiento_Tomate_6 <- match(df_Pimiento_Tomate_6$ASV, tt$ASV_ID)
+
+  # función simple para limpiar prefijos tipo "f__", "g__", etc.
+  clean <- function(x) {
+    x <- as.character(x)
+    x[ x %in% c("", " ", "NA", NA) ] <- NA
+    x <- sub("^[a-z]__\\s*", "", x, ignore.case = TRUE)
+    x <- trimws(x)
+    x[ x == "" ] <- NA
+    x
+  }
+
+  df_Pimiento_Tomate_6$Family <- clean(tt$Family[idx_Pimiento_Tomate_6])
+  df_Pimiento_Tomate_6$Genus  <- clean(tt$Genus[idx_Pimiento_Tomate_6])
+
+  # aviso si hay ASVs sin unir
+  
+  no_match <- df_Pimiento_Tomate_6$ASV[ is.na(idx_Pimiento_Tomate_6) ]
+  if (length(no_match) > 0) message("ASVs sin match en tt$ASV_ID: ", paste(head(no_match, 20), collapse = ", "))
+} else {
+  df_Pimiento_Tomate_6$Family <- NA
+  df_Pimiento_Tomate_6$Genus  <- NA
+}
+
+# guardar CSV
+outfile_Pimiento_Tomate_6 <- "ASV_onefile_summary_Pimiento_Tomate_6.csv"
+write.csv(df_Pimiento_Tomate_6, outfile_Pimiento_Tomate_6, row.names = FALSE)
+cat("Wrote", outfile_Pimiento_Tomate_6, "with", nrow(df_Pimiento_Tomate_6), "rows\n")
+print(df_Pimiento_Tomate_6)
+
+```
+
+## Análisis Tomatillo - Tomate {#Tomatillo-Tomate}
+
+
+```{r}
+
+set.seed(134)
+
+# =============================================================================
+# Para Tomatillo - Tomate
+# =============================================================================
+
+ps_Tomatillo_Tomate_6 <- subset_samples(ps_nocontrol_filtrado_rare,
+    ((Tipo_planta == "Tomatillo" & Tipo_linea == "Heteroespecífica") |
+     (Tipo_planta == "Tomate"   & Tipo_linea == "Conespecífica")) &
+     Pase == 6)
+
+
+sd_Tomatillo_Tomate_6 <- as.data.frame(sample_data(ps_Tomatillo_Tomate_6))
+
+
+ordered_samples_Tomatillo_Tomate_6 <- c(rownames(sd_Tomatillo_Tomate_6)[sd_Tomatillo_Tomate_6$Tipo_linea == "Conespecífica"],
+                     rownames(sd_Tomatillo_Tomate_6)[sd_Tomatillo_Tomate_6$Tipo_linea == "Heteroespecífica"],
+                     setdiff(rownames(sd_Tomatillo_Tomate_6), rownames(sd_Tomatillo_Tomate_6)[sd_Tomatillo_Tomate_6$Tipo_linea %in% c("Conespecífica","Heteroespecífica")]))
+
+
+
+# 1) Reordenar sample_data
+
+sample_data(ps_Tomatillo_Tomate_6) <- sample_data(sd_Tomatillo_Tomate_6[ordered_samples_Tomatillo_Tomate_6, , drop = FALSE])
+
+# 2) Reordenar la otu_table para que coincida 
+
+if (taxa_are_rows(otu_table(ps_Tomatillo_Tomate_6))) {
+  ot <- as(otu_table(ps_Tomatillo_Tomate_6), "matrix")
+  ot <- ot[, ordered_samples_Tomatillo_Tomate_6, drop = FALSE]
+  otu_table(ps_Tomatillo_Tomate_6) <- otu_table(ot, taxa_are_rows = TRUE)
+} else {
+  ot <- as(otu_table(ps_Tomatillo_Tomate_6), "matrix")
+  ot <- ot[ordered_samples_Tomatillo_Tomate_6, , drop = FALSE]
+  otu_table(ps_Tomatillo_Tomate_6) <- otu_table(ot, taxa_are_rows = FALSE)
+}
+
+# 3) Comprobar resultado
+
+cat("sample_names ahora:\n"); print(head(sample_names(ps_Tomatillo_Tomate_6), 20))
+cat("Tabla Tipo_linea (orden en sample_data):\n"); print(table(as.character(sample_data(ps_Tomatillo_Tomate_6)$Tipo_linea)))  
+  
+  
+
+rel_Tomatillo_Tomate_6  <- rel_all[ match(sample_names(ps_Tomatillo_Tomate_6), rownames(rel_all)), , drop = FALSE ]
+
+
+# mapear columnas de rel_Tomatillo_Tomate_6  a ASV_ID 
+
+tt_orig <- as.data.frame(tax_table(ps_nocontrol_filtrado_rare))
+mapped_ids_rel_Tomatillo_Tomate_6  <- tt_orig$ASV_ID[ match(colnames(rel_Tomatillo_Tomate_6), rownames(tt_orig)) ]
+if (any(is.na(mapped_ids_rel_Tomatillo_Tomate_6))) stop("Error mapeando rel_Tomatillo_Tomate_6 a tax_table.")
+colnames(rel_Tomatillo_Tomate_6) <- mapped_ids_rel_Tomatillo_Tomate_6
+
+# crear data.frame con relativas (SampleID + ASV1..ASVn)
+
+otu_df_rel_Tomatillo_Tomate_6 <- data.frame(SampleID = rownames(rel_Tomatillo_Tomate_6), rel_Tomatillo_Tomate_6, check.names = FALSE)
+
+
+# comprobación rápida: las filas deben sumar ~1
+head(rowSums(otu_df_rel_Tomatillo_Tomate_6[ , -1]))
+
+if (!is.numeric(otu_df_rel_Tomatillo_Tomate_6[,1])) ASV3_Tomatillo_Tomate_6 <- otu_df_rel_Tomatillo_Tomate_6[,2:ncol(otu_df_rel_Tomatillo_Tomate_6)] else  ASV3_Tomatillo_Tomate_6 <- otu_df_rel_Tomatillo_Tomate_6[,1:ncol(otu_df_rel_Tomatillo_Tomate_6)]  
+
+sum(ASV3_Tomatillo_Tomate_6[1,]) 
+
+# Creación de variables
+
+yval_Tomatillo_Tomate_6<- c(as.numeric(as.matrix(ASV3_Tomatillo_Tomate_6[,])))
+species_Tomatillo_Tomate_6 <- as.factor(rep(1:ncol(ASV3_Tomatillo_Tomate_6),each=12))
+plant_Tomatillo_Tomate_6 <- rep(1:12,ncol(ASV3_Tomatillo_Tomate_6))
+trans.type_Tomatillo_Tomate_6 <- as.factor(1*(plant_Tomatillo_Tomate_6<7)+1)  #6 primeras plantas de un tipo y las 6 segundas del otro
+plant_Tomatillo_Tomate_6 <- as.factor(plant_Tomatillo_Tomate_6) 		# 1 para heteroespecífica, 2 para conespecífica
+
+
+# Primera Fase: Presencia/Ausencia
+
+above.zero_Tomatillo_Tomate_6 <- 1*(yval_Tomatillo_Tomate_6!=0)
+d.brm_Tomatillo_Tomate_6 <- data.frame(above.zero=above.zero_Tomatillo_Tomate_6,trans.type=trans.type_Tomatillo_Tomate_6,species=species_Tomatillo_Tomate_6,plant=plant_Tomatillo_Tomate_6)
+fit0_Tomatillo_Tomate_6 <- brm(above.zero~(trans.type|species)+(1|plant), family=bernoulli,data=d.brm_Tomatillo_Tomate_6,iter=8000) 
+contrasts(d.brm_Tomatillo_Tomate_6$trans.type)
+
+
+# Extraer las pendientes y ordenarlas
+
+ran0_Tomatillo_Tomate_6 <- ranef(fit0_Tomatillo_Tomate_6)
+trans.species.effect_Tomatillo_Tomate_6 <- ran0_Tomatillo_Tomate_6$species[,,"trans.type2"]
+o0_Tomatillo_Tomate_6 <- order(trans.species.effect_Tomatillo_Tomate_6[,1])
+
+
+## Identificación de ASVs relevantes
+
+species.that.colonize.worse_Tomatillo_Tomate_6 <- which(trans.species.effect_Tomatillo_Tomate_6[,4]<0,arr.ind=TRUE)  #β < 0 => nivel "1" tiene menor respuesta que nivel "2"
+species.that.colonize.better_Tomatillo_Tomate_6 <- which(trans.species.effect_Tomatillo_Tomate_6[,3]>0,arr.ind=TRUE) #β > 0 => nivel "1" tiene mayor respuesta que nivel "2"
+
+
+samps_Tomatillo_Tomate_6 <- sample_names(ps_Tomatillo_Tomate_6)
+plant_index_Tomatillo_Tomate_6<- 1:length(samps_Tomatillo_Tomate_6)
+data.frame(plant = plant_index_Tomatillo_Tomate_6, Sample = samps_Tomatillo_Tomate_6)
+
+
+colnames(ASV3_Tomatillo_Tomate_6)[species.that.colonize.worse_Tomatillo_Tomate_6]  #Mejor en las Heteroespecíficas
+colnames(ASV3_Tomatillo_Tomate_6)[species.that.colonize.better_Tomatillo_Tomate_6]  #Mejor en las conespecíficas
+
+idx_colonize_worse_Tomatillo_Tomate_6 <- as.integer(species.that.colonize.worse_Tomatillo_Tomate_6)
+asv_colonize_worse_Tomatillo_Tomate_6 <- colnames(ASV3_Tomatillo_Tomate_6)[ idx_colonize_worse_Tomatillo_Tomate_6 ]
+head(asv_colonize_worse_Tomatillo_Tomate_6)
+
+
+idx_colonize_better_Tomatillo_Tomate_6 <- as.integer(species.that.colonize.better_Tomatillo_Tomate_6)
+asv_colonize_better_Tomatillo_Tomate_6 <- colnames(ASV3_Tomatillo_Tomate_6)[ idx_colonize_better_Tomatillo_Tomate_6 ]
+head(asv_colonize_better_Tomatillo_Tomate_6)
+
+
+# Segunda Fase: relación de la abundancia con el modo de transmisión
+
+d.brm1_Tomatillo_Tomate_6 <- data.frame(yvalN=log(yval_Tomatillo_Tomate_6),trans.typeN=trans.type_Tomatillo_Tomate_6,speciesN=species_Tomatillo_Tomate_6,plantN=plant_Tomatillo_Tomate_6)
+d.brm1_Tomatillo_Tomate_6 <- d.brm1_Tomatillo_Tomate_6[above.zero_Tomatillo_Tomate_6==1,]
+cat("Filas (obs positivas):", nrow(d.brm1_Tomatillo_Tomate_6), "\n")
+table(d.brm1_Tomatillo_Tomate_6$trans.typeN)
+fit1_Tomatillo_Tomate_6 <- brm(yvalN~(trans.typeN|speciesN)+(1|plantN), data=d.brm1_Tomatillo_Tomate_6,iter=8000) 
+
+
+# Extraer las pendientes y ordenarlas
+
+ran1_Tomatillo_Tomate_6 <- ranef(fit1_Tomatillo_Tomate_6, summary = TRUE)
+trans.species.effect1_Tomatillo_Tomate_6 <- ran1_Tomatillo_Tomate_6$speciesN[,,"trans.typeN2"]
+o1_Tomatillo_Tomate_6 <- order(trans.species.effect1_Tomatillo_Tomate_6[,1])
+
+## Identificación de ASVs relevantes
+
+species.that.ra.worse_Tomatillo_Tomate_6 <- which(trans.species.effect1_Tomatillo_Tomate_6[,4]<0,arr.ind=TRUE) #Menos abundante en conespecifica.
+species.that.ra.better_Tomatillo_Tomate_6 <- which(trans.species.effect1_Tomatillo_Tomate_6[,3]>0,arr.ind=TRUE) #Menos abundante en Heteroespecífica.
+
+
+colnames(ASV3_Tomatillo_Tomate_6)[species.that.ra.worse_Tomatillo_Tomate_6] 
+colnames(ASV3_Tomatillo_Tomate_6)[species.that.ra.better_Tomatillo_Tomate_6]
+
+
+idx_ra_worse_Tomatillo_Tomate_6 <- as.integer(species.that.ra.worse_Tomatillo_Tomate_6)
+asv_ra_worse_Tomatillo_Tomate_6 <- colnames(ASV3_Tomatillo_Tomate_6)[ idx_ra_worse_Tomatillo_Tomate_6 ]
+head(asv_ra_worse_Tomatillo_Tomate_6)
+
+
+idx_ra_better_Tomatillo_Tomate_6 <- as.integer(species.that.ra.better_Tomatillo_Tomate_6)
+asv_ra_better_Tomatillo_Tomate_6 <- colnames(ASV3_Tomatillo_Tomate_6)[ idx_ra_better_Tomatillo_Tomate_6 ]
+head(asv_ra_better_Tomatillo_Tomate_6)
+
+
+# Definir vectores de ASVs
+
+presence_more_cone_Tomatillo_Tomate_6   <- as.character(if (exists("asv_colonize_better_Tomatillo_Tomate_6")) asv_colonize_better_Tomatillo_Tomate_6 else character(0))
+presence_more_hetero_Tomatillo_Tomate_6 <- as.character(if (exists("asv_colonize_worse_Tomatillo_Tomate_6"))  asv_colonize_worse_Tomatillo_Tomate_6  else character(0))
+abundance_more_cone_Tomatillo_Tomate_6   <- as.character(if (exists("asv_ra_better_Tomatillo_Tomate_6"))      asv_ra_better_Tomatillo_Tomate_6      else character(0))
+abundance_more_hetero_Tomatillo_Tomate_6 <- as.character(if (exists("asv_ra_worse_Tomatillo_Tomate_6"))             asv_ra_worse_Tomatillo_Tomate_6             else character(0))
+
+# todas los ASVs que aparecen en alguna categoría (sin duplicados)
+
+all_asvs_Tomatillo_Tomate_6 <- sort(unique(c(presence_more_cone_Tomatillo_Tomate_6, presence_more_hetero_Tomatillo_Tomate_6, abundance_more_cone_Tomatillo_Tomate_6, abundance_more_hetero_Tomatillo_Tomate_6)))
+
+
+# construir data.frame
+
+df_Tomatillo_Tomate_6 <- data.frame(
+  ASV = all_asvs_Tomatillo_Tomate_6,
+  Presence_more_Conespecific_Tomatillo_Tomate_6   = all_asvs_Tomatillo_Tomate_6 %in% presence_more_cone_Tomatillo_Tomate_6,
+  Presence_more_heteroespecific_Tomatillo_Tomate_6 = all_asvs_Tomatillo_Tomate_6 %in% presence_more_hetero_Tomatillo_Tomate_6,
+  Abundance_more_Conespecific_Tomatillo_Tomate_6 = all_asvs_Tomatillo_Tomate_6 %in% abundance_more_cone_Tomatillo_Tomate_6,
+  Abundance_more_heteroespecific_Tomatillo_Tomate_6 = all_asvs_Tomatillo_Tomate_6 %in% abundance_more_hetero_Tomatillo_Tomate_6,
+  stringsAsFactors = FALSE
+)
+
+# añadir taxonomía si existe el objeto phyloseq (ps_nocontrol_filtrado_rare) y tax_table
+if (exists("ps_nocontrol_filtrado_rare")) {
+  tt <- as.data.frame(tax_table(ps_nocontrol_filtrado_rare))
+df_Tomatillo_Tomate_6$ASV <- as.character(df_Tomatillo_Tomate_6$ASV)
+  tt$ASV_ID       <- as.character(tt$ASV_ID)
+
+  # unir por la columna ASV_ID en tt
+  idx_Tomatillo_Tomate_6 <- match(df_Tomatillo_Tomate_6$ASV, tt$ASV_ID)
+
+  # función simple para limpiar prefijos tipo "f__", "g__", etc.
+  clean <- function(x) {
+    x <- as.character(x)
+    x[ x %in% c("", " ", "NA", NA) ] <- NA
+    x <- sub("^[a-z]__\\s*", "", x, ignore.case = TRUE)
+    x <- trimws(x)
+    x[ x == "" ] <- NA
+    x
+  }
+
+  df_Tomatillo_Tomate_6$Family <- clean(tt$Family[idx_Tomatillo_Tomate_6])
+  df_Tomatillo_Tomate_6$Genus  <- clean(tt$Genus[idx_Tomatillo_Tomate_6])
+
+  # aviso si hay ASVs sin unir
+  no_match <- df_Tomatillo_Tomate_6$ASV[ is.na(idx_Tomatillo_Tomate_6) ]
+  if (length(no_match) > 0) message("ASVs sin match en tt$ASV_ID: ", paste(head(no_match, 20), collapse = ", "))
+} else {
+  df_Tomatillo_Tomate_6$Family <- NA
+  df_Tomatillo_Tomate_6$Genus  <- NA
+}
+
+# guardar CSV
+outfile_Tomatillo_Tomate_6 <- "ASV_onefile_summary_Tomatillo_Tomate_6.csv"
+write.csv(df_Tomatillo_Tomate_6, outfile_Tomatillo_Tomate_6, row.names = FALSE)
+cat("Wrote", outfile_Tomatillo_Tomate_6, "with", nrow(df_Tomatillo_Tomate_6), "rows\n")
+print(df_Tomatillo_Tomate_6)
+
+
+```
+
+
