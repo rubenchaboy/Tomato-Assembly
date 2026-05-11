@@ -1,0 +1,1715 @@
+---
+title: "Script capítulo Deriva"
+author: "Ruben Chaboy"
+date: 
+output: html_document
+---
+
+<style>
+hr {
+  border: 0;
+  height: 8px;        /* grosor de la línea */
+  background: #000;   /* color */
+  margin: 20px 0;     /* espacio arriba/abajo (opcional) */
+}
+</style>
+
+
+# Tabla de contenidos
+
+1. [Carga de librerías](#librerias)
+
+2. [Preparación de los datos](#datos)
+
+3. [Eliminación de controles y muestras no representativas](#controles)
+
+4. [Eliminación de secuencias no bacterianas](#nobacterias)
+
+5. [Correción de NAs](#nas)
+
+6. [Creación de los objetos de trabajo](#ps)
+
+7. [Subsamplear](#subsampleo)
+
+8. [Guardado y carga](#guardado)
+
+9. [Análisis de diversidad y correlaciones](#analisis-diversidad)
+
+    1. [Creación de las variables de trabajo](#creacion)
+
+    2. [Representación de las variables de trabajo](#representacion)
+
+    3. [Análisis estadístico de Pase y Dilución ](#analisis-estadistico)
+
+    4. [Efecto de Riqueza y la diversidad filogenética sobre Carga y Peso](#correlacion)
+
+14. [Análisis filogenético](#analisis-filogenetico)
+
+    1. [Top 10 familias Comunidad A](#top-familias-A)
+
+    2. [Top 10 familias Comunidad B](#top-familias-B)
+
+    3. [Top 10 familias Comunidad C](#top-familias-C)
+
+15. [Análisis de la composición microbiana](#analisis-composicion)
+
+    1. [Composición Microbiana - Comunidad-A - Bray-Curtis](#composicion-bray-A)
+
+    2. [Análisis de redundancia - Comunidad-A - Bray-Curtis](#redundancia-bray-A)
+
+    3. [Composición Microbiana - Comunidad-B - Bray-Curtis](#composicion-bray-B)
+
+    4. [Análisis de redundancia - Comunidad-B - Bray-Curtis](#redundancia-bray-B)
+
+    5. [Composición Microbiana - Comunidad-C - Bray-Curtis](#composicion-bray-C)
+
+    6. [Análisis de redundancia - Comunidad-C - Bray-Curtis](#redundancia-bray-C)
+
+    7. [Creación de paneles de NMDS Bray-Curtis](#paneles-Bray-Curtis)
+
+    8. [Composición Microbiana - Comunidad-A - Unifrac](#composicion-uni-A)
+
+    9. [Análisis de redundancia - Comunidad-A - Unifrac](#redundancia-uni-A)
+
+    10. [Composición Microbiana - Comunidad-B - Unifrac](#composicion-uni-B)
+
+    11. [Análisis de redundancia - Comunidad-B - Unifrac](#redundancia-uni-B)
+
+    12. [Composición Microbiana - Comunidad-C - Unifrac](#composicion-uni-C)
+
+    13. [Análisis de redundancia - Comunidad-C - Unifrac](#redundancia-uni-C)
+
+    14. [Creación de paneles de NMDS Unifrac](#paneles-Unifrac)
+
+
+## Carga de librerías y datos {#librerias}
+
+Se cargan las librerías que se van a utilizar en el estudio.Se cargan los datos que provienen de seguir el procesado de secuencias siguiendo el flujo estándar del paquete DADA2. Estos datos contienen la tabla de abundancias de ASVs por muestra así como su asignación taxonómica. 
+
+```{r}
+knitr::opts_knit$set(root.dir = getwd())
+suppressMessages(suppressWarnings({
+datos <- "dada2multithreads.RData"
+suppressPackageStartupMessages({
+library(dada2)
+library(ggplot2)
+library(here)
+library(phyloseq)
+library(microbiome)
+library(dplyr)
+library(writexl)
+library(readxl)
+library(openxlsx)
+library(gridExtra)
+library(patchwork)
+library(Biostrings)
+library(tidyr)
+library(tibble)
+library(vegan)
+library(scales)
+library(car)
+library(emmeans)
+library(officer)
+library(flextable)
+library(broom)
+library(pheatmap)
+library(picante)
+library(reshape2)
+library(ppcor)
+library(lmerTest)
+library(lme4)
+library(purrr)
+library(stringr)
+library(cowplot)
+library(ggrepel)
+theme_set(theme_bw())
+load(here("data",datos)) }) })) 
+
+dir.create("test")
+dir.create("graficos")
+dir.create("graficos/ComunidadA")
+dir.create("graficos/ComunidadB")
+dir.create("graficos/ComunidadC")
+out_graf <- "graficos"
+out_graf_A <- "graficos/ComunidadA"
+out_graf_B <- "graficos/ComunidadB"
+out_graf_C <- "graficos/ComunidadC"
+
+if (!dir.exists(out_graf_A)) dir.create(out_graf_A, recursive = TRUE)
+if (!dir.exists(out_graf_B)) dir.create(out_graf_B, recursive = TRUE)
+if (!dir.exists(out_graf_C)) dir.create(out_graf_C, recursive = TRUE)
+```
+
+## Preparación de los datos {#datos}
+  
+1.	Se importan todos los datos del experimento (contenidos en un fichero Excel).
+2.	Creación del objeto phyloseq.
+
+```{r}
+samdf <- read_excel("metadata_deriva.xlsx")
+samdf <- as.data.frame(samdf)
+
+
+rownames(samdf) <- samdf$Nombre
+
+ps <- phyloseq(otu_table(seqtab_nochim, taxa_are_rows = FALSE), 
+               sample_data(samdf), 
+               tax_table(tax))
+
+```
+### Eliminación de controles y muestras no representativas {#controles}
+
+Eliminación de aquellas muestras que corresponden a controles, ya sean controles negativos de planta (CN), controles de extracción de ADN (Cext) y controles negativos de PCR (NegPCR) y aquellas muestras que no se secuenciaron pero están incluidas en el fichero de secuenciación (NA).
+También se eliminan aquellas muestras que se obtuvieron de plantas que no crecieron correctamente. 
+
+```{r}
+ps_nocontrol <- subset_samples(ps, !(Comunidad %in% c("CS", "Cext", "negPCR", "Neg")) & !is.na(Comunidad) &                 Observaciones %in% c("OK"))
+```
+
+
+### Eliminación de secuencias no bacterianas {#nobacterias}
+
+Eliminación de aquellas secuencias correspondientes a mitocondrias, cloroplastos y eucariotas. Esto es debido a que los primers elegidos pueden secuenciar el 16S de estos orgánulos. 
+
+```{r}
+print("Inicial:")
+ps_nocontrol
+inicial<-sum(otu_table(ps_nocontrol))
+print ("Aqui vamos a quitar cloroplastos, mitocondrias y eucariotas")
+ps_nocontrol_filtrado<- subset_taxa(ps_nocontrol, Class!="Chloroplast")
+sin_cloroplastos<-sum(otu_table(ps_nocontrol_filtrado))
+ps_nocontrol_filtrado <- subset_taxa(ps_nocontrol_filtrado, Family!="Mitochondria")
+sin_mitocondrias<-sum(otu_table(ps_nocontrol_filtrado))
+ps_nocontrol_filtrado <- subset_taxa(ps_nocontrol_filtrado, Kingdom!="Eukaryota")
+sin_eucariotas<-sum(otu_table(ps_nocontrol_filtrado))
+valores<-c(inicial,sin_cloroplastos,sin_mitocondrias,sin_eucariotas)
+print("inicial,sin_cloroplastos,sin_mitocondrias,sin_eucariotas")
+print(valores)
+print(paste0("Total inicial= ",inicial))
+print(paste0("  quitando cloroplastos= ",sin_cloroplastos))
+print(paste0("  quitando cloroplastos y mitocondrias= ",sin_mitocondrias))
+print(paste0("  quitando cloroplastos, mitocondrias y eucariotas= ",sin_eucariotas))
+print("Filtrado:")
+ps_nocontrol_filtrado
+
+suppressMessages(summarize_phyloseq(ps_nocontrol_filtrado))
+
+saveRDS(ps_nocontrol_filtrado, file = "ps_nocontrol_filtrado.rds")
+
+```
+
+### Correción de NAs {#nas}
+
+Aquellas muestras que tienen valores de MPN como NA (por no haber crecido las bacterias correspondientes a esas muestras) o estar por debajo del límite de detección (<110000 MPN/mL) se transforman a  este valor de límite de detección, 220000 bacterias por planta. 
+
+1. Se reemplazan los valores de texto "NA" por valores faltantes, cuyo código es NA, pero no en formato texto como se encuentran en la hoja de datos original. 
+
+2. Se convierte la columna MPN a tipo numérico.
+
+3. Se reemplazan los valores NA (faltantes) en la columna MPN con 220000.
+
+4. Se convierten todos los valores menores que 110000 en la columna MPN a 220000.
+
+
+En el caso del peso seco, a aquellas muestras que tienen valores NA (por no haber crecido lo suficiente la parte aérea) se les asocia un valor de 0 gramos. 
+
+1. Se reemplazan los valores de texto "NA" por valores  NA (faltantes).
+
+2. Se convierte la columna Peso a tipo numérico.
+
+3. Reemplazamos los valores NA (faltantes) en la columna Peso con 0.
+
+```{r}
+
+sample_data(ps_nocontrol_filtrado)$MPN[sample_data(ps_nocontrol_filtrado)$MPN == "NA"] <- NA
+sample_data(ps_nocontrol_filtrado)$MPN <- as.numeric(sample_data(ps_nocontrol_filtrado)$MPN)
+
+
+sample_data(ps_nocontrol_filtrado)$MPN <-  ifelse(is.na(sample_data(ps_nocontrol_filtrado)$MPN) &
+      sample_data(ps_nocontrol_filtrado)$Pase != 1,220000,sample_data(ps_nocontrol_filtrado)$MPN
+  )  #Se transforman los NA de los pases 2 a 6 en 2200000. Los de Pase 1 como son datos inexistentes se mantienen como NA. 
+
+
+sample_data(ps_nocontrol_filtrado)$MPN[sample_data(ps_nocontrol_filtrado)$MPN < 220000] <- 220000
+
+sample_data(ps_nocontrol_filtrado)$Peso_Seco[sample_data(ps_nocontrol_filtrado)$Peso_Seco == "NA"] <- NA
+sample_data(ps_nocontrol_filtrado)$Peso_Seco <- as.numeric(sample_data(ps_nocontrol_filtrado)$Peso_Seco)
+sample_data(ps_nocontrol_filtrado)$Peso_Seco[is.na(sample_data(ps_nocontrol_filtrado)$Peso_Seco)] <- 0
+
+```
+
+### Creación de los objetos de trabajo {#ps}
+
+Separamos en tres objetos diferentes según la comunidad inoculada
+```{r}
+Comunidad <- unique(sample_data(ps_nocontrol_filtrado)$Comunidad)
+ps_A <- subset_samples(ps_nocontrol_filtrado, Comunidad == "A")
+ps_B <- subset_samples(ps_nocontrol_filtrado, Comunidad == "B")
+ps_C <- subset_samples(ps_nocontrol_filtrado, Comunidad == "C")
+
+```
+
+## Subsamplear {#subsampleo}
+
+Se representa en una gráfica el número de secuencias por muestra para saber a cuánto subsamplear. Se utiliza una seed fija, 134. 
+
+```{r}
+
+sort(sample_sums(ps_A), decreasing = TRUE)
+
+
+suppressMessages(suppressWarnings({
+  set.seed(134)  
+  ps_A_rare <- rarefy_even_depth(ps_A, sample.size = 9526, trimOTUs = TRUE)
+}))
+
+
+plot(
+  sort(sample_sums(ps_A)),
+  ylab = "Profundidad de secuenciación",
+  xlab = "Muestras ordenadas por profundidad",
+  main = "Profundidad de secuenciación por muestra - comunidad A")
+
+abline(h = 9526, col = "red", lwd = 2)
+
+
+sort(sample_sums(ps_B), decreasing = TRUE)
+
+suppressMessages(suppressWarnings({
+  set.seed(134)  
+  ps_B_rare <- rarefy_even_depth(ps_B, sample.size = 7895, trimOTUs = TRUE)
+}))
+
+
+plot(
+  sort(sample_sums(ps_B)),
+  ylab = "Profundidad de secuenciación",
+  xlab = "Muestras ordenadas por profundidad",
+  main = "Profundidad de secuenciación por muestra - comunidad B")
+
+abline(h = 7895, col = "red", lwd = 2)
+
+
+sort(sample_sums(ps_C), decreasing = TRUE)
+
+suppressMessages(suppressWarnings({
+  set.seed(134)  
+  ps_C_rare <- rarefy_even_depth(ps_C, sample.size = 10961, trimOTUs = TRUE)
+}))
+
+
+plot(
+  sort(sample_sums(ps_C)),
+  ylab = "Profundidad de secuenciación",
+  xlab = "Muestras ordenadas por profundidad",
+  main = "Profundidad de secuenciación por muestra - comunidad C")
+
+abline(h = 10961, col = "red", lwd = 2)
+
+# Guardado de curvas de subsampleo con panel
+png("graficos/panel_profundidad_secuenciacion_layout2x2.png",
+    units = "in", width = 12, height = 8, res = 300)
+
+mat <- matrix(c(1, 2,3, 0), nrow = 2, byrow = TRUE)
+layout(mat, widths = c(1, 1), heights = c(1, 1))
+
+# 1) A (fila superior izquierda)
+par(mar = c(4.0, 5.0, 2.2, 0.8), mgp = c(2.2, 0.7, 0))
+plot(
+  sort(sample_sums(ps_A)),
+  ylab = "Profundidad de secuenciación",
+  xlab = "Muestras ordenadas por profundidad",
+  main = "Profundidad de secuenciación por muestra - comunidad A",
+  cex.lab = 1.1, cex.axis = 1.0, cex.main = 1.1,
+  pch = 20, col = "grey30"
+)
+abline(h = 9526, col = "red", lwd = 2)
+mtext("A)", side = 3, adj = 0, line = 0.2, cex = 1.1)
+
+# 2) B (fila superior derecha) 
+par(mar = c(4.0, 1.2, 2.2, 0.8), mgp = c(2.2, 0.7, 0))
+plot(
+  sort(sample_sums(ps_B)),
+  ylab = "",   
+  xlab = "Muestras ordenadas por profundidad",
+  main = "Profundidad de secuenciación por muestra - comunidad B",
+  cex.lab = 1.1, cex.axis = 1.0, cex.main = 1.1,
+  pch = 20, col = "grey30"
+)
+abline(h = 7895, col = "red", lwd = 2)
+mtext("B)", side = 3, adj = 0, line = 0.2, cex = 1.1)
+
+# 3) C (fila inferior izquierda) 
+par(mar = c(4.0, 5.0, 2.2, 0.8), mgp = c(2.2, 0.7, 0))
+plot(
+  sort(sample_sums(ps_C)),
+  ylab = "Profundidad de secuenciación",
+  xlab = "Muestras ordenadas por profundidad",
+  main = "Profundidad de secuenciación por muestra - comunidad C",
+  cex.lab = 1.1, cex.axis = 1.0, cex.main = 1.1,
+  pch = 20, col = "grey30"
+)
+abline(h = 10961, col = "red", lwd = 2)
+mtext("C)", side = 3, adj = 0, line = 0.2, cex = 1.1)
+
+dev.off()
+
+```
+
+## Guardado y carga {#guardado}
+
+Guardado del objeto phylosec.
+
+```{r}
+
+saveRDS(ps_nocontrol_filtrado, file = "ps_nocontrol_filtrado.rds")
+
+```
+
+En otro script, partiendo del objeto phyloseq anterior, se "mapean" sus secuencias contra una base de datos de referencia con árbol y taxonomía asociados (ej. greengenes2). De esta forma se incluye el árbol filogenético en el objeto y se pueden realizar análisis mediante medidas filogenéticas (ej.: Faith, Unifrac,...)
+
+```{r}
+
+A_nuevosdatos <- "A_phyloseq_objects_with_tree.Rdata"
+B_nuevosdatos <- "B_phyloseq_objects_with_tree.Rdata"
+C_nuevosdatos <- "C_phyloseq_objects_with_tree.Rdata"
+
+load(here("data",A_nuevosdatos ))
+load(here("data",B_nuevosdatos ))
+load(here("data",C_nuevosdatos ))
+
+```
+
+---
+
+# **Análisis de diversidad y correlaciones** {#analisis-diversidad} 
+
+## Creación de las variables de trabajo {#creacion}
+
+Dado que en el caso de la dilución 6 hay pocas muestras de las comunidades A y B en comparación con el resto de diluciones, se suprimen para no distorsionar los resultados. 
+
+```{r}
+
+#Veo cuántas muestras hay para cada dilución 
+table(sample_data(ps_A_rare)$Dilucion)
+table(sample_data(ps_B_rare)$Dilucion)
+table(sample_data(ps_C_rare)$Dilucion)
+
+table(sample_data(ps_A_rare)$Pase,
+      sample_data(ps_A_rare)$Dilucion)
+
+table(sample_data(ps_B_rare)$Pase,
+      sample_data(ps_B_rare)$Dilucion)
+
+table(sample_data(ps_C_rare)$Pase,
+      sample_data(ps_C_rare)$Dilucion)
+
+
+ps_A_rare <- subset_samples(ps_A_rare, as.character(Dilucion) != "6")
+ps_B_rare <- subset_samples(ps_B_rare, as.character(Dilucion) != "6")
+ps_C_rare <- subset_samples(ps_C_rare, as.character(Dilucion) != "6")
+
+new_ps_A <- subset_samples(new_ps_A, as.character(Dilucion) != "6")
+new_ps_B <- subset_samples(new_ps_B, as.character(Dilucion) != "6")
+new_ps_C <- subset_samples(new_ps_C, as.character(Dilucion) != "6")
+
+ps_list     <- list(A = ps_A_rare, B = ps_B_rare, C = ps_C_rare)
+new_ps_list <- list(A = new_ps_A, B = new_ps_B, C = new_ps_C)
+
+datos_est_list <- list()
+
+for (name in names(ps_list)) {
+  
+  datos_est <- as(sample_data(ps_list[[name]]), "data.frame")
+  datos_est$log_MPN <- log10(datos_est$MPN)
+  
+  Riqueza <- estimate_richness(ps_list[[name]], measures = "Observed")
+  Homogeneidad <- estimate_richness(ps_list[[name]], measures = "Shannon")
+  
+  rownames(Riqueza) <- gsub("\\.", "-", rownames(Riqueza)) 
+  datos_est$Riqueza      <- Riqueza[rownames(datos_est), "Observed"]
+  datos_est$Homogeneidad <- Homogeneidad[rownames(datos_est), "Shannon"]
+  
+  # Faith's PD con new_ps
+  Faith <- pd(as(otu_table(new_ps_list[[name]]), "matrix"), phy_tree(new_ps_list[[name]]))
+  datos_est$Faith_D <- Faith[rownames(datos_est), "PD"]
+  
+  # Tipos de variable
+  datos_est$Pase     <- as.integer(datos_est$Pase)
+  datos_est$cPase    <- as.numeric(scale(datos_est$Pase, center = TRUE, scale = TRUE))
+     
+    datos_est$Dilucion <- as.numeric(datos_est$Dilucion)
+   datos_est$cDilucion    <- as.numeric(scale(datos_est$Dilucion, center = TRUE, scale = TRUE))
+
+
+  datos_est_list[[name]] <- datos_est
+}
+
+# 
+datos_est_A <- datos_est_list$A
+datos_est_B <- datos_est_list$B
+datos_est_C <- datos_est_list$C
+datos_est <- rbind(datos_est_A, datos_est_B, datos_est_C)
+
+# Recomendación de contrastes (sum-to-zero) para interpretaciones estables en diseños desbalanceados. Codifica los factores de forma que la media de todos los niveles sea el intercepto y los coeficientes sean desviaciones respecto a esa media (en lugar de compararlos con un nivel de referencia). Esto da resultados más estables y fáciles de interpretar en diseños desbalanceados.
+options(contrasts = c("contr.sum", "contr.poly"))
+
+
+datos_est$Dilucion  <- as.integer(datos_est$Dilucion)  # 0..6
+# Versión centrada y escalada para estabilidad numérica
+datos_est$cDilucion <- as.numeric(scale(datos_est$Dilucion, center = TRUE, scale = TRUE))
+
+datos_est$Pase  <- as.integer(datos_est$Pase)  # 1..6
+# Versión centrada y escalada para estabilidad numérica
+datos_est$cPase <- as.numeric(scale(datos_est$Pase, center = TRUE, scale = TRUE))
+
+nombres_destacados <- c(A = "S482", B = "S524", C = "S535")
+muestras_destacadas <- map_chr(nombres_destacados, ~ {
+  match <- datos_est$Nombre[str_detect(datos_est$Nombre, paste0(.x, "$"))]
+  if (length(match) == 0) NA else match[1]
+})
+muestras_destacadas_df <- datos_est %>%
+  filter(Nombre %in% muestras_destacadas)
+
+```
+
+### Representación de las variables de trabajo {#representacion}
+
+Se representan los valores de las variables de trabajo por Pase y Dilución. 
+
+```{r}
+
+  mpn_panel <- datos_est %>%
+  ggplot(aes(x = factor(Pase), y = log_MPN, group = interaction(Dilucion, Replica))) +
+  geom_line(aes(color = factor(Dilucion)), linewidth = 0.5) +
+  geom_point(data = muestras_destacadas_df, 
+             aes(x = Pase, y = log_MPN),
+             shape = 21, fill = "red", color = "black", size = 2, stroke = 1.2) +
+  facet_wrap(~Comunidad) +
+  labs(x = "Pase", y = "log MPN", color = "Dilución") +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(nrow = 1))+
+    theme(
+      axis.text.x  = element_text(size = 12, angle = 0, hjust = 1),
+      axis.text.y  = element_text(size = 12),
+      axis.title.x = element_text(size = 12, face = "bold"),
+      axis.title.y = element_text(size = 12, face = "bold"),
+      legend.text  = element_text(size = 12),
+      legend.title = element_text(size = 12, face="bold"),
+      plot.title   = element_text(size = 14, face = "bold", hjust = 0.5)
+    )
+  
+   ggsave(
+  filename = file.path(out_graf, "mpn_panel.png"),
+  plot = mpn_panel,
+  width = 12,    
+  height = 5,    
+  dpi = 300
+)
+
+Destacar_Peso <- datos_est %>%
+  filter(Nombre %in% muestras_destacadas) %>%
+  dplyr::select(Pase, log_Peso_Seco_mg, Comunidad, Dilucion, Replica)
+
+
+Peso_panel <- datos_est %>%
+  ggplot(aes(x = factor(Pase), y = log_Peso_Seco_mg, group = interaction(Dilucion, Replica))) +
+  geom_line(aes(color = factor(Dilucion)), linewidth = 0.5) +
+  geom_point(data = muestras_destacadas_df, 
+             aes(x = Pase, y = log_Peso_Seco_mg),
+             shape = 21, fill = "red", color = "black", size = 2, stroke = 1.2) +
+  facet_wrap(~Comunidad) +
+  labs(x = "Pase", y = " log Peso_Seco (mg)", color = "Dilución") +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(nrow = 1)) +
+    theme(
+      axis.text.x  = element_text(size = 12, angle = 0, hjust = 1),
+      axis.text.y  = element_text(size = 12),
+      axis.title.x = element_text(size = 12, face = "bold"),
+      axis.title.y = element_text(size = 12, face = "bold"),
+      legend.text  = element_text(size = 12),
+      legend.title = element_text(size = 12, face="bold"),
+      plot.title   = element_text(size = 14, face = "bold", hjust = 0.5)
+    )
+
+ggsave(
+  filename = file.path(out_graf, "Peso_panel.png"),
+  plot = Peso_panel,
+  width = 12,   
+  height = 5,    
+  dpi = 300
+)
+
+
+Riqueza_panel <- datos_est %>%
+  ggplot(aes(x = factor(Pase), y = Riqueza, group = interaction(Dilucion, Replica))) +
+  geom_line(aes(color = factor(Dilucion)), linewidth = 0.5) +
+  geom_point(data = muestras_destacadas_df, 
+             aes(x = Pase, y = Riqueza),
+             shape = 21, fill = "red", color = "black", size = 2, stroke = 1.2) +
+  facet_wrap(~Comunidad) +
+  labs(x = "Pase", y = " Riqueza observada", color = "Dilución") +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(nrow = 1))+
+    theme(
+      axis.text.x  = element_text(size = 12, angle = 0, hjust = 1),
+      axis.text.y  = element_text(size = 12),
+      axis.title.x = element_text(size = 12, face = "bold"),
+      axis.title.y = element_text(size = 12, face = "bold"),
+      legend.text  = element_text(size = 12),
+      legend.title = element_text(size = 12, face="bold"),
+      plot.title   = element_text(size = 14, face = "bold", hjust = 0.5)
+    )
+
+ggsave(
+  filename = file.path(out_graf, "Riqueza_panel.png"),
+  plot = Riqueza_panel,
+  width = 12,   
+  height = 5,    
+  dpi = 300
+)
+
+Homogeneidad_panel <- datos_est %>%
+  ggplot(aes(x = factor(Pase), y = Homogeneidad, group = interaction(Dilucion, Replica))) +
+  geom_line(aes(color = factor(Dilucion)), linewidth = 0.5) +
+  geom_point(data = muestras_destacadas_df, 
+             aes(x = Pase, y = Homogeneidad),
+             shape = 21, fill = "red", color = "black", size = 2, stroke = 1.2) +
+  facet_wrap(~Comunidad) +
+  labs(x = "Pase", y = " Homogeneidad ", color = "Dilución") +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(nrow = 1))+
+    theme(
+      axis.text.x  = element_text(size = 12, angle = 0, hjust = 1),
+      axis.text.y  = element_text(size = 12),
+      axis.title.x = element_text(size = 12, face = "bold"),
+      axis.title.y = element_text(size = 12, face = "bold"),
+      legend.text  = element_text(size = 12),
+      legend.title = element_text(size = 12, face="bold"),
+      plot.title   = element_text(size = 14, face = "bold", hjust = 0.5)
+    )
+ggsave(
+  filename = file.path(out_graf, "Homogeneidad_panel.png"),
+  plot = Homogeneidad_panel,
+  width = 12,   
+  height = 5,    
+  dpi = 300
+)
+
+Faith_panel <- datos_est %>%
+  ggplot(aes(x = factor(Pase), y = Faith_D, group = interaction(Dilucion, Replica))) +
+  geom_line(aes(color = factor(Dilucion)), linewidth = 0.5) +
+  geom_point(data = muestras_destacadas_df, 
+             aes(x = Pase, y = Faith_D),
+             shape = 21, fill = "red", color = "black", size = 2, stroke = 1.2) +
+  facet_wrap(~Comunidad) +
+  labs(x = "Pase", y = "Diversidad", color = "Dilución") +
+  theme_bw() +
+  theme(legend.position = "bottom") +
+  guides(color = guide_legend(nrow = 1))+
+    theme(
+      axis.text.x  = element_text(size = 12, angle = 0, hjust = 1),
+      axis.text.y  = element_text(size = 12),
+      axis.title.x = element_text(size = 12, face = "bold"),
+      axis.title.y = element_text(size = 12, face = "bold"),
+      legend.text  = element_text(size = 12),
+      legend.title = element_text(size = 12, face="bold"),
+      plot.title   = element_text(size = 14, face = "bold", hjust = 0.5)
+    )
+
+ggsave(
+  filename = file.path(out_graf, "Faith_panel.png"),
+  plot = Faith_panel,
+  width = 12,   
+  height = 5,    
+  dpi = 300
+)
+
+```
+
+### Análisis estadístico de Pase y Dilución  {#analisis-estadistico}
+
+Se analiza estadísticamente el efecto de Pase, Dilución y su interacción sobre las variables de trabajo. 
+
+```{r}
+
+datos_est <- rbind(datos_est_A, datos_est_B, datos_est_C)
+A_2_6 <- subset(datos_est_A, Pase %in% 2:6)
+B_2_6 <- subset(datos_est_B, Pase %in% 2:6)
+C_2_6 <- subset(datos_est_C, Pase %in% 2:6)
+datos_est_2_6 <- subset(datos_est, Pase %in% 2:6)
+
+options(contrasts = c("contr.sum", "contr.poly"))
+datos_est$Comunidad <- as.factor(datos_est$Comunidad)
+contrasts(datos_est$Comunidad)
+
+# ========================================================================
+# Análisis Riqueza
+# ========================================================================
+
+modelo_lmer_Riqueza <- lmer(Riqueza ~ cPase*cDilucion + (1 | LineaId),  data = datos_est)
+
+summary(modelo_lmer_Riqueza)
+anova(modelo_lmer_Riqueza)
+
+
+# ========================================================================
+# Análisis Homogeneidad
+# ========================================================================
+
+modelo_lmer_Homogeneidad <- lmer(Homogeneidad ~ cPase*cDilucion + (1 | LineaId),  data = datos_est)
+
+summary(modelo_lmer_Homogeneidad)
+anova(modelo_lmer_Homogeneidad)
+
+# ========================================================================
+# Análisis Diversidad
+# ========================================================================
+
+modelo_lmer_Faith <- lmer(Faith_D ~ cPase*cDilucion + (1 |LineaId),  data = datos_est)
+
+summary(modelo_lmer_Faith)
+anova(modelo_lmer_Faith)
+
+# ========================================================================
+# Análisis Carga
+# ========================================================================
+
+modelo_lmer_mpn <- lmer(log_MPN ~ cPase*cDilucion + (1 | LineaId), data = datos_est_2_6)
+summary(modelo_lmer_mpn)
+anova(modelo_lmer_mpn)
+
+# =============================================================================
+# Análisis Peso
+# =============================================================================
+
+modelo_lmer_Peso <- lmer(log_Peso_Seco_mg ~ cPase*cDilucion + (1 | LineaId), data = datos_est)
+summary(modelo_lmer_Peso)
+anova(modelo_lmer_Peso)
+#Hay singularidad, por lo que se ajusta un modelo lineal
+
+modelo_lm_Peso <- lm(log_Peso_Seco_mg ~ cPase*cDilucion, data = datos_est)
+lmtest::bptest(modelo_lm_Peso)
+summary(modelo_lm_Peso)
+Anova(modelo_lm_Peso, type = 3)
+par(mfrow=c(2,2))
+plot(modelo_lm_Peso, main = "log10(Peso_Seco_mg)")
+par(mfrow=c(1,1))
+
+modelo_lm_Peso <- lm(log_Peso_Seco_mg ~ Comunidad*cPase*cDilucion, data = datos_est)
+lmtest::bptest(modelo_lm_Peso)
+summary(modelo_lm_Peso)
+Anova(modelo_lm_Peso, type = 3)
+
+
+par(mfrow=c(2,2))
+plot(modelo_lm_Peso, main = "log10(Peso_Seco_mg)")
+par(mfrow=c(1,1))
+
+```
+
+### Efecto de Riqueza y la diversidad filogenética sobre Carga y Peso {#correlacion}
+
+Se calcula el efecto de Riqueza y la diversidad filogenética sobre Carga y Peso. Primero se analiza si existe una correlación entre ambas variables y, en caso de detectarse, se calcula la fracción de la diversidad filogenética que es independiente de Riqueza. A continuación, se calculan los efectos de Riqueza y la fracción de la diversidad filogenética independiente de Riqueza sobre Carga y Peso. 
+
+```{r}
+
+# 1) Exploración inicial ---------------------------------------------------
+# Scatterplot de Riqueza vs Faith_D con smoothing y recta para ver linealidad
+png("graficos/riqueza_vs_faith.png", width = 800, height = 600)
+
+par(mar = c(5, 6.5, 4, 2) + 0.1,   
+    mgp = c(2.5, 0.8, 0))          
+
+plot(datos_est$Riqueza, datos_est$Faith_D,
+     xlab = "Riqueza", ylab = "Diversidad",
+     main = "Riqueza frente a Diversidad",
+     cex.lab = 1.8,   
+     cex.axis = 1.6,  
+     cex.main = 2.2,  
+     cex = 1.2,       
+     pch = 20, col = "grey30")
+
+lines(lowess(datos_est$Riqueza, datos_est$Faith_D), col = "blue")
+abline(lm(Faith_D ~ Riqueza, data = datos_est), col = "red", lwd = 2)
+
+dev.off()
+
+# Correlación (numérico)
+res_cor <- cor.test(datos_est$Riqueza, datos_est$Faith_D, method = "pearson")
+print(res_cor)          
+res_cor$estimate        
+res_cor$p.value          
+
+
+# 2) Residualizar Faith_D respecto a Riqueza (fracción de la diversidad de Faith independiente de Riqueza ) ----
+m_FD_vs_r <- lm(Faith_D ~ Riqueza, data = datos_est)
+datos_est$FD_resid <- resid(m_FD_vs_r)   
+
+#Caso especial para MPN (datos de pases 2 a 6)
+m_FD_vs_r <- lm(Faith_D ~ Riqueza, data = datos_est_2_6)
+datos_est_2_6$FD_resid <- resid(m_FD_vs_r)
+
+# 3) Modelos con la fracción de ka diversidad de Faith independiente de Riqueza
+
+modelo_lmer_peso_resid <- lmer(log_Peso_Seco_mg ~ Riqueza + FD_resid + (1 | LineaId), data = datos_est, REML = FALSE)
+print(summary(modelo_lmer_peso_resid))
+print(Anova(modelo_lmer_peso_resid, type = "II"))
+print(anova(modelo_lmer_peso_resid))
+
+modelo_lm_peso_resid <- lm(log_Peso_Seco_mg ~ Riqueza + FD_resid, data = datos_est)
+cat("Resumen modelo final (Peso_Seco ~ Riqueza + FD_resid):\n")
+print(summary(modelo_lm_peso_resid))
+print(Anova(modelo_lm_peso_resid, type = "II"))
+lmtest::bptest(modelo_lm_peso_resid)
+
+modelo_lmer_mpn_resid <- lmer(log_MPN ~ Riqueza + FD_resid + (1 | LineaId), data = datos_est_2_6)
+cat("Resumen modelo final (MPN ~ Riqueza + FD_resid):\n"); print(summary(modelo_lmer_mpn_resid))
+print(Anova(modelo_lmer_mpn_resid, type = "II"))
+
+```
+---
+
+# **Análisis filogenético** {#analisis-filogenetico}
+
+## Top 10 familias A {#top-familias-A}
+
+Se calculan las 10 familias más abundantes de la comunidad A, separando por pases de muestreo.  
+
+```{r}
+
+# ========================================================================
+# Top 10 Familias Comunidad A
+# ========================================================================
+
+ps_family_A <- tax_glom(ps_A_rare, taxrank = "Family")
+ps_family_rel_A <- transform_sample_counts(ps_family_A, function(x) x / sum(x))
+
+dfA <- phyloseq::psmelt(ps_family_rel_A) |>
+  dplyr::mutate(
+    Family = as.character(Family),
+    Family = dplyr::if_else(is.na(Family) | Family == "", "Unassigned", Family),
+    Family_plot = forcats::fct_lump_n(Family, n = 10, w = Abundance, other_level = "Otros")
+  )
+
+# Sumar por muestra (Top10/Otros).
+per_sample_A <- dfA |>
+  group_by(Sample, Dilucion, Pase, Family_plot) |>
+  summarise(Abund_rel = sum(Abundance), .groups = "drop") 
+
+# Promedio por grupo
+familia_plot_A <- per_sample_A |>
+  dplyr::group_by(Dilucion, Pase, Family_plot) |>
+  dplyr::summarise(NormalizedAbundance = mean(Abund_rel), .groups = "drop")
+
+familia_plot_A <- familia_plot_A |>
+  mutate(
+    Family_plot = forcats::fct_reorder(Family_plot, NormalizedAbundance, .fun = mean, .desc = TRUE),
+    Family_plot = forcats::fct_relevel(Family_plot, "Otros", after = Inf)
+  )
+
+
+Top10_otros_A <- ggplot(familia_plot_A, aes(x = factor(Pase), y = NormalizedAbundance, fill = Family_plot)) +
+  geom_bar(stat = "identity", position = "stack")  +
+  scale_fill_brewer(palette = "Set3") +
+    labs(title = "Top10 familias - Comunidad A",
+       x = "Pase",
+       y = "Abundancia relativa",
+       fill = "Familia") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right",
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+    legend.title = element_text(size = 10, face = "bold")) +
+  facet_wrap(~ Dilucion, scales = "free_y", ncol = 3) 
+
+
+ggsave("graficos/ComunidadA/Top10_Familias_otros_Comunidad_A.png",
+       plot = Top10_otros_A, width = 12, height = 6, dpi = 300)
+
+```
+
+## Top 10 familias B {#top-familias-B}
+
+Se calculan las 10 familias más abundantes de la comunidad B separando por pases de muestreo.   
+
+```{r}
+
+# =============================================================================
+# Top 10 Familias Comunidad B
+# =============================================================================
+
+ps_family_B <- tax_glom(ps_B_rare, taxrank = "Family")
+ps_family_rel_B <- transform_sample_counts(ps_family_B, function(x) x / sum(x))
+
+dfB <- phyloseq::psmelt(ps_family_rel_B) |>
+  dplyr::mutate(
+    Family = as.character(Family),
+    Family = dplyr::if_else(is.na(Family) | Family == "", "Unassigned", Family),
+    Family_plot = forcats::fct_lump_n(Family, n = 10, w = Abundance, other_level = "Otros")
+  )
+
+# Sumar por muestra (Top10/Otros).
+per_sample_B <- dfB |>
+  group_by(Sample, Dilucion, Pase, Family_plot) |>
+  summarise(Abund_rel = sum(Abundance), .groups = "drop") 
+
+# Promedio por grupo
+familia_plot_B <- per_sample_B |>
+  dplyr::group_by(Dilucion, Pase, Family_plot) |>
+  dplyr::summarise(NormalizedAbundance = mean(Abund_rel), .groups = "drop")
+
+
+familia_plot_B <- familia_plot_B |>
+  mutate(
+    Family_plot = forcats::fct_reorder(Family_plot, NormalizedAbundance, .fun = mean, .desc = TRUE),
+    Family_plot = forcats::fct_relevel(Family_plot, "Otros", after = Inf)
+  )
+
+
+Top10_otros_B <- ggplot(familia_plot_B, aes(x = factor(Pase), y = NormalizedAbundance, fill = Family_plot)) +
+  geom_bar(stat = "identity", position = "stack")  +
+  scale_fill_brewer(palette = "Set3") +
+    labs(title = "Top10 familias - Comunidad B",
+       x = "Pase",
+       y = "Abundancia relativa",
+       fill = "Familia") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right",
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+    legend.title = element_text(size = 10, face = "bold")) +
+  facet_wrap(~ Dilucion, scales = "free_y", ncol = 3) 
+
+
+ggsave("graficos/ComunidadB/Top10_Familias_otros_Comunidad_B.png",
+       plot = Top10_otros_B, width = 12, height = 6, dpi = 300)
+
+```
+
+## Top 10 familias C {#top-familias-C}
+
+Se calculan las 10 familias más abundantes de la comunidad C separando por pases de muestreo.   
+
+```{r}
+
+ps_family_C <- tax_glom(ps_C_rare, taxrank = "Family")
+ps_family_rel_C <- transform_sample_counts(ps_family_C, function(x) x / sum(x))
+
+dfC <- phyloseq::psmelt(ps_family_rel_C) |>
+  dplyr::mutate(
+    Family = as.character(Family),
+    Family = dplyr::if_else(is.na(Family) | Family == "", "Unassigned", Family),
+    Family_plot = forcats::fct_lump_n(Family, n = 10, w = Abundance, other_level = "Otros")
+  )
+
+# Sumar por muestra (Top10/Otros).
+per_sample_C <- dfC |>
+  group_by(Sample, Dilucion, Pase, Family_plot) |>
+  summarise(Abund_rel = sum(Abundance), .groups = "drop") 
+
+# Promedio por grupo
+familia_plot_C <- per_sample_C |>
+  dplyr::group_by(Dilucion, Pase, Family_plot) |>
+  dplyr::summarise(NormalizedAbundance = mean(Abund_rel), .groups = "drop")
+
+familia_plot_C <- familia_plot_C |>
+  mutate(
+    Family_plot = forcats::fct_reorder(Family_plot, NormalizedAbundance, .fun = mean, .desc = TRUE),
+    Family_plot = forcats::fct_relevel(Family_plot, "Otros", after = Inf)
+  )
+
+
+Top10_otros_C <- ggplot(familia_plot_C, aes(x = factor(Pase), y = NormalizedAbundance, fill = Family_plot)) +
+  geom_bar(stat = "identity", position = "stack")  +
+  scale_fill_brewer(palette = "Set3") +
+    labs(title = "Top10 familias - Comunidad C",
+       x = "Pase",
+       y = "Abundancia relativa",
+       fill = "Familia") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right",
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+    legend.title = element_text(size = 10, face = "bold")) +
+  facet_wrap(~ Dilucion, scales = "free_y", ncol = 3) 
+
+
+ggsave("graficos/ComunidadC/Top10_Familias_otros_Comunidad_C.png",
+       plot = Top10_otros_C, width = 12, height = 6, dpi = 300)
+
+```
+---
+
+# **Análisis de la composición microbiana** {#analisis-composicion}
+
+## Composición Microbiana - Comunidad-A - Bray-Curtis {#composicion-bray-A}
+
+Aqui se representa la composición microbiana de las muestras de la comunidad A, mediante el método NMDS (Non-Metric Multidimensional Scaling) utilizando distancias Bray-Curtis, separando los datos por Pase y Dilución, y agrupándolos visualmente según estas variables.
+
+```{r}
+
+# ========================================================================
+# NMDS-Bray Comunidad A
+# ========================================================================
+
+ps_prop_A <- transform_sample_counts(ps_A_rare, function(otu) otu/sum(otu))
+set.seed(123)
+ord_nmds_bray_A <- ordinate(ps_prop_A, method="NMDS", distance="bray")
+
+
+destacados <- paste(nombres_destacados, collapse = "|")
+
+#=========================================================================
+# Gráfico 1: Color = Dilución 
+# ========================================================================
+
+bray_Dilucion_A <- plot_ordination(ps_prop_A, ord_nmds_bray_A, 
+                                    shape="Pase", color="Dilucion", title="NMDS Bray-Curtis Comunidad A") +
+  geom_point(size = 3, alpha = 0.7) +
+     geom_point(
+    data = function(df) df[grepl(destacados, rownames(df)), ],
+    size = 6, 
+    stroke = 1, 
+    color = "red", 
+    shape = 21, 
+    fill = NA
+  ) +
+  scale_shape_manual(values = c(0:9)) +
+  scale_color_manual(values = c("blue", "green", "purple", "orange", "pink", "cyan", "black"))+
+  guides(color = guide_legend(nrow = 6), shape = guide_legend(nrow = 6)) +
+  labs(color = "Dilución", shape = "Pase") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+# ========================================================================
+# Gráfico 2: Color = Pase 
+# ========================================================================
+
+bray_Pase_A <- plot_ordination(ps_prop_A, ord_nmds_bray_A, 
+                                shape="Dilucion", color="Pase", title="NMDS Bray-Curtis Comunidad A") +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_point(
+    data = function(df) df[grepl(destacados, rownames(df)), ],
+    size = 6, 
+    stroke = 1, 
+    color = "red", 
+    shape = 21, 
+    fill = NA
+  ) +
+    scale_shape_manual(values = c(0:9)) +
+  scale_color_manual(values = c("blue", "green", "purple", "orange", "pink", "cyan", "black"))+
+  guides(color = guide_legend(nrow = 6), shape = guide_legend(nrow = 6)) +
+  labs(color = "Pase", shape = "Dilución") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+ggsave("graficos/ComunidadA/Bray-Curtis_Dilucion_A.png", 
+       bray_Dilucion_A, width = 8, height = 6, dpi = 300)
+
+ggsave("graficos/ComunidadA/Bray-Curtis_pase_A.png", 
+       bray_Pase_A, width = 8, height = 6, dpi = 300)
+
+# Paneles combinados
+
+bray_paneles_A <- (bray_Dilucion_A | bray_Pase_A) +
+  plot_annotation(
+    tag_levels = 'A',
+    tag_prefix = "",
+    tag_suffix = ") "
+  )
+
+ggsave("graficos/ComunidadA/Bray-Curtis_paneles_A.png", 
+       bray_paneles_A, width = 14, height = 6, dpi = 300)
+
+```
+
+### Análisis de Redundancia - Comunidad-A - Bray-Curtis {#redundancia-bray-A}
+
+Se aplica un análisis de redundancia basado en distancias (dbRDA con Bray–Curtis) en su versión parcial, modelando la composición de las muestras de la comunidad A en función de Pase mientras se controla el efecto de Dilución y  también modelando la composición de las muestras en función de Dilución mientras se controla por Pase.
+
+```{r}
+
+Z_A <- as(otu_table(ps_prop_A), "matrix")
+if (taxa_are_rows(ps_prop_A)) Z_A <- t(Z_A)
+
+bray_A <- vegdist(Z_A, method = "bray")
+
+meta_A <- data.frame(sample_data(ps_prop_A))
+meta_A$Dilucion <- as.numeric(meta_A$Dilucion)
+meta_A$Pase <- as.numeric(meta_A$Pase)
+
+mod_db_A <- capscale(bray_A ~ Pase + Condition(Dilucion), data = meta_A)
+anova(mod_db_A)   
+RsquareAdj(mod_db_A)
+
+mod_db_Dil_A <- capscale(bray_A ~ Dilucion + Condition(Pase), data = meta_A)
+anova(mod_db_Dil_A)
+RsquareAdj(mod_db_Dil_A)
+
+```
+
+## Composición Microbiana - Comunidad-B - Bray-Curtis {#composicion-bray-B}
+
+Aqui se representa la composición microbiana de las muestras de la comunidad B, mediante el método NMDS  utilizando distancias Bray-Curtis, separando los datos por Pase y Dilución, y agrupándolos visualmente según estas variables.
+
+```{r}
+
+# =============================================================================
+# NMDS-Bray Comunidad B
+# =============================================================================
+
+ps_prop_B <- transform_sample_counts(ps_B_rare, function(otu) otu/sum(otu))
+set.seed(123)
+ord_nmds_bray_B <- ordinate(ps_prop_B, method="NMDS", distance="bray")
+
+#=============================================================================
+# Gráfico 1: Color = Dilución 
+# =============================================================================
+
+bray_Dilucion_B <- plot_ordination(ps_prop_B, ord_nmds_bray_B, 
+                                    shape="Pase", color="Dilucion", title="NMDS Bray-Curtis Comunidad B") +
+  geom_point(size = 3, alpha = 0.7) +
+     geom_point(
+    data = function(df) df[grepl(destacados, rownames(df)), ],
+    size = 6, 
+    stroke = 1, 
+    color = "red", 
+    shape = 21, 
+    fill = NA
+  ) +
+  scale_shape_manual(values = c(0:9)) +
+  scale_color_manual(values = c("blue", "green", "purple", "orange", "pink", "cyan", "black"))+
+  guides(color = guide_legend(nrow = 6), shape = guide_legend(nrow = 6)) +
+  labs(color = "Dilución", shape = "Pase") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+# =============================================================================
+# Gráfico 2: Color = Pase 
+# =============================================================================
+
+bray_Pase_B <- plot_ordination(ps_prop_B, ord_nmds_bray_B, 
+                                shape="Dilucion", color="Pase", title="NMDS Bray-Curtis Comunidad B") +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_point(
+    data = function(df) df[grepl(destacados, rownames(df)), ],
+    size = 6, 
+    stroke = 1, 
+    color = "red", 
+    shape = 21, 
+    fill = NA
+  ) +
+    scale_shape_manual(values = c(0:9)) +
+  scale_color_manual(values = c("blue", "green", "purple", "orange", "pink", "cyan", "black"))+
+  guides(color = guide_legend(nrow = 6), shape = guide_legend(nrow = 6)) +
+  labs(color = "Pase", shape = "Dilución") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+
+ggsave("graficos/ComunidadB/Bray-Curtis_Dilucion_B.png", 
+       bray_Dilucion_B, width = 8, height = 6, dpi = 300)
+
+ggsave("graficos/ComunidadB/Bray-Curtis_pase_B.png", 
+       bray_Pase_B, width = 8, height = 6, dpi = 300)
+
+# Paneles combinados
+
+bray_paneles_B <- (bray_Dilucion_B | bray_Pase_B) +
+  plot_annotation(
+    tag_levels = 'A',
+    tag_prefix = "",
+    tag_suffix = ") "
+  )
+
+ggsave("graficos/ComunidadB/Bray-Curtis_paneles_B.png", 
+       bray_paneles_B, width = 14, height = 6, dpi = 300)
+
+```
+
+### Análisis de Redundancia - Comunidad-B - Bray-Curtis {#redundancia-bray-B}
+
+Se aplica un dbRDA con distancias Bray–Curtis en su versión parcial, modelando la composición de las muestras de la comuniad B en función de Pase mientras se controla el efecto de Dilución y  también modelando la composición de las muestras en función de Dilución mientras se controla por Pase.
+
+```{r}
+
+Z_B <- as(otu_table(ps_prop_B), "matrix")
+if (taxa_are_rows(ps_prop_B)) Z_B <- t(Z_B)
+
+bray_B <- vegdist(Z_B, method = "bray")
+
+meta_B <- data.frame(sample_data(ps_prop_B))
+meta_B$Dilucion <- as.numeric(meta_B$Dilucion)
+meta_B$Pase <- as.numeric(meta_B$Pase)
+
+mod_db_B <- capscale(bray_B ~ Pase + Condition(Dilucion), data = meta_B)
+anova(mod_db_B)             
+RsquareAdj(mod_db_B)
+
+mod_db_Dil_B <- capscale(bray_B ~ Dilucion + Condition(Pase), data = meta_B)
+anova(mod_db_Dil_B)
+RsquareAdj(mod_db_Dil_B)
+
+```
+
+## Composición Microbiana - Comunidad-C - Bray-Curtis {#composicion-bray-C}
+
+Aqui se representa la composición microbiana de las muestras de la comunidad C, mediante el método NMDS ( utilizando distancias Bray-Curtis, separando los datos por Pase y Dilución, y agrupándolos visualmente según estas variables.
+
+```{r}
+
+# ========================================================================
+# NMDS-Bray Comunidad C
+# ========================================================================
+
+ps_prop_C <- transform_sample_counts(ps_C_rare, function(otu) otu/sum(otu))
+set.seed(123)
+ord_nmds_bray_C <- ordinate(ps_prop_C, method="NMDS", distance="bray")
+
+#=========================================================================
+# Gráfico 1: Color = Dilución 
+# ========================================================================
+
+bray_Dilucion_C <- plot_ordination(ps_prop_C, ord_nmds_bray_C, 
+                                    shape="Pase", color="Dilucion", title="NMDS Bray-Curtis Comunidad C") +
+  geom_point(size = 3, alpha = 0.7) +
+     geom_point(
+    data = function(df) df[grepl(destacados, rownames(df)), ],
+    size = 6, 
+    stroke = 1, 
+    color = "red", 
+    shape = 21, 
+    fill = NA
+  ) +
+  scale_shape_manual(values = c(0:9)) +
+  scale_color_manual(values = c("blue", "green", "purple", "orange", "pink", "cyan", "black"))+
+  guides(color = guide_legend(nrow = 6), shape = guide_legend(nrow = 6)) +
+  labs(color = "Dilución", shape = "Pase") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+# ========================================================================
+# Gráfico 2: Color = Pase 
+# ========================================================================
+
+bray_Pase_C <- plot_ordination(ps_prop_C, ord_nmds_bray_C, 
+                                shape="Dilucion", color="Pase", title="NMDS Bray-Curtis Comunidad C") +
+  geom_point(size = 3, alpha = 0.7) +
+  geom_point(
+    data = function(df) df[grepl(destacados, rownames(df)), ],
+    size = 6, 
+    stroke = 1, 
+    color = "red", 
+    shape = 21, 
+    fill = NA
+  ) +
+    scale_shape_manual(values = c(0:9)) +
+  scale_color_manual(values = c("blue", "green", "purple", "orange", "pink", "cyan", "black"))+
+  guides(color = guide_legend(nrow = 6), shape = guide_legend(nrow = 6)) +
+  labs(color = "Pase", shape = "Dilución") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+ggsave("graficos/ComunidadC/Bray-Curtis_Dilucion_C.png", 
+       bray_Dilucion_C, width = 8, height = 6, dpi = 300)
+
+ggsave("graficos/ComunidadC/Bray-Curtis_pase_C.png", 
+       bray_Pase_C, width = 8, height = 6, dpi = 300)
+
+# Paneles combinados
+
+bray_paneles_C <- (bray_Dilucion_C | bray_Pase_C) +
+  plot_annotation(
+    tag_levels = 'A',
+    tag_prefix = "",
+    tag_suffix = ") "
+  )
+
+ggsave("graficos/ComunidadC/Bray-Curtis_paneles_C.png", 
+       bray_paneles_C, width = 14, height = 6, dpi = 300)
+```
+
+### Análisis de Redundancia - Comunidad-C - Bray-Curtis {#redundancia-bray-C}
+
+Se aplica un dbRDA con distancias Bray–Curtis en su versión parcial, modelando la composición de las muestras de la comunidad C en función de Pase mientras se controla el efecto de Dilución y  también modelando la composición de las muestras en función de Dilución mientras se controla por Pase.
+
+```{r}
+
+Z_C <- as(otu_table(ps_prop_C), "matrix")
+if (taxa_are_rows(ps_prop_C)) Z_C <- t(Z_C)
+
+bray_C <- vegdist(Z_C, method = "bray")
+
+meta_C <- data.frame(sample_data(ps_prop_C))
+meta_C$Dilucion <- as.numeric(meta_C$Dilucion)
+meta_C$Pase <- as.numeric(meta_C$Pase)
+
+mod_db_C <- capscale(bray_C ~ Pase + Condition(Dilucion), data = meta_C)
+anova(mod_db_C)
+summary(mod_db_C)
+RsquareAdj(mod_db_C)
+
+mod_db_Dil_C <- capscale(bray_C ~ Dilucion + Condition(Pase), data = meta_C)
+anova(mod_db_Dil_C)
+summary(mod_db_Dil_C)
+RsquareAdj(mod_db_Dil_C)
+
+```
+
+### Creación de Paneles de NMDS Bray-Curtis {#paneles-Bray-Curtis}
+
+Aquí se juntan los distintos NMDS de distancias Bray-Curtis para crear los paneles finales. 
+
+```{r}
+
+bray_paneles_Dilucion <- (bray_Dilucion_A | bray_Dilucion_B | bray_Dilucion_C) +
+  plot_annotation(
+    tag_levels = "A",
+    tag_prefix = "",
+    tag_suffix = ")"
+  ) & theme(
+    legend.position = "right",
+    legend.title = element_text(size = 14),
+    legend.text  = element_text(size = 12))
+
+bray_paneles_Dilucion <- bray_paneles_Dilucion + plot_layout(guides = "collect") 
+
+
+  
+ggsave("graficos/bray_paneles_Dilucion.png", 
+       bray_paneles_Dilucion, width = 14, height = 6, dpi = 300) 
+
+ggsave("graficos/bray_paneles_Dilucion_A4_landscape.png",
+       bray_paneles_Dilucion,
+       width = 29.7, height = 21.0, units = "cm",
+       dpi = 300, bg = "white")
+
+
+bray_paneles_Pase <- (bray_Pase_A | bray_Pase_B| bray_Pase_C) +
+ plot_annotation(
+    tag_levels = "A",
+    tag_prefix = "",
+    tag_suffix = ")"
+  ) & theme(
+    legend.position = "right",
+    legend.title = element_text(size = 14),
+    legend.text  = element_text(size = 12))
+
+ bray_paneles_Pase <- bray_paneles_Pase + plot_layout(guides = "collect")
+
+
+ggsave("graficos/bray_paneles_Pase.png", 
+       bray_paneles_Pase, width = 14, height = 6, dpi = 300)
+
+
+ggsave("graficos/bray_paneles_Pase_A4_landscape.png",
+       bray_paneles_Pase,
+       width = 29.7, height = 21.0, units = "cm",
+       dpi = 300, bg = "white")
+
+```
+
+## Composición Microbiana - Comunidad-A - Unifrac {#composicion-uni-A}
+
+Se representa la composición microbiana de las muestras de la comunidad A, mediante el método NMDS  utilizando distancias Unifrac, separando los datos por Pase y Dilución, y agrupándolos visualmente según estas variables.
+
+```{r}
+
+# ========================================================================
+# NMDS-Unifrac Comunidad A
+# ========================================================================
+
+set.seed(123)
+ord_nmds_unifrac_A <- ordinate(new_ps_A, method = "NMDS", distance = "Unifrac", weighted=TRUE)      
+
+
+Unifrac_Dilucion_A <- plot_ordination(new_ps_A, ord_nmds_unifrac_A, shape="Pase", color="Dilucion", title="NMDS Unifrac Comunidad A") +
+  geom_point(size = 3, alpha = 0.7) +
+     geom_point(
+    data = function(df) df[grepl(destacados, rownames(df)), ],
+    size = 6, 
+    stroke = 1, 
+    color = "red", 
+    shape = 21, 
+    fill = NA
+  ) +
+  scale_shape_manual(values = c(0:9)) +
+  scale_color_manual(values = c("blue", "green", "purple", "orange", "pink", "cyan", "black"))+
+  guides(color = guide_legend(nrow = 6), shape = guide_legend(nrow = 6)) +
+  labs(color = "Dilución", shape = "Pase") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+
+ggsave("graficos/ComunidadA/Unifrac_Dilucion_A .png", plot = Unifrac_Dilucion_A, width = 8, height = 6, dpi = 300)
+
+Unifrac_Pase_A <- plot_ordination(new_ps_A, ord_nmds_unifrac_A, shape="Dilucion", color="Pase", title="NMDS Unifrac Comunidad A") +
+  geom_point(size = 3, alpha = 0.7) +
+     geom_point(
+    data = function(df) df[grepl(destacados, rownames(df)), ],
+    size = 6, 
+    stroke = 1, 
+    color = "red", 
+    shape = 21, 
+    fill = NA
+  ) +
+  scale_shape_manual(values = c(0:9)) +
+  scale_color_manual(values = c("blue", "green", "purple", "orange", "pink", "cyan", "black"))+
+  guides(color = guide_legend(nrow = 6), shape = guide_legend(nrow = 6)) +
+  labs(color = "Pase", shape = "Dilución") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+ggsave("graficos/ComunidadA/Unifrac_Pase_A .png", plot = Unifrac_Pase_A, width = 8, height = 6, dpi = 300)
+
+
+Unifrac_paneles_A <-  (Unifrac_Dilucion_A |Unifrac_Pase_A) +
+  plot_annotation(
+    tag_levels = 'A',
+    tag_prefix = "",
+    tag_suffix = ") "
+  )
+
+ggsave("graficos/ComunidadA/Unifrac_paneles_A.png", Unifrac_paneles_A, width = 14, height = 6, dpi = 300)
+
+```
+
+### Análisis de Redundancia - Comunidad-A - Unifrac {#redundancia-uni-A}
+
+Se aplica un dbRDA con distancias Unifrac en su versión parcial, modelando la composición de las muestras de la comunidad A en función de Pase mientras se controla el efecto de Dilución y  también modelando la composición de las muestras en función de Dilución mientras se controla por Pase.
+
+```{r}
+
+Uni_A <- phyloseq::distance(new_ps_A, method = "unifrac", weighted = TRUE)
+
+meta_Uni_A <- data.frame(sample_data(new_ps_A))
+meta_Uni_A$Dilucion <- as.numeric(meta_Uni_A$Dilucion)
+meta_Uni_A$Pase <- as.numeric(meta_Uni_A$Pase)
+
+mod_db_uni_A<- capscale(Uni_A ~ Pase + Condition(Dilucion), data = meta_Uni_A)
+anova(mod_db_uni_A)             
+summary(mod_db_uni_A)
+RsquareAdj(mod_db_uni_A)
+
+mod_db_uni_Dil_A<- capscale(Uni_A ~ Dilucion + Condition(Pase), data = meta_Uni_A)
+anova(mod_db_uni_Dil_A) 
+summary(mod_db_uni_Dil_A)
+RsquareAdj(mod_db_uni_Dil_A)
+
+```
+
+## Composición Microbiana - Comunidad-B - Unifrac {#composicion-uni-B}
+
+Se representa la composición microbiana de las muestras de la comunidad B, mediante el método NMDS  utilizando distancias Unifrac, separando los datos por Pase y Dilución, y agrupándolos visualmente según estas variables.
+
+```{r}
+
+# ========================================================================
+# NMDS-Unifrac Comunidad B
+# ========================================================================
+
+set.seed(123)
+ord_nmds_unifrac_B <- ordinate(new_ps_B, method = "NMDS", distance = "Unifrac", weighted=TRUE)      
+
+
+Unifrac_Dilucion_B <- plot_ordination(new_ps_B, ord_nmds_unifrac_B, shape="Pase", color="Dilucion", title="NMDS Unifrac Comunidad B") +
+  geom_point(size = 3, alpha = 0.7) +
+     geom_point(
+    data = function(df) df[grepl(destacados, rownames(df)), ],
+    size = 6, 
+    stroke = 1, 
+    color = "red", 
+    shape = 21, 
+    fill = NA
+  ) +
+  scale_shape_manual(values = c(0:9)) +
+  scale_color_manual(values = c("blue", "green", "purple", "orange", "pink", "cyan", "black"))+
+  guides(color = guide_legend(nrow = 6), shape = guide_legend(nrow = 6)) +
+  labs(color = "Dilución", shape = "Pase") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+ggsave("graficos/ComunidadB/Unifrac_Dilucion_B .png", plot = Unifrac_Dilucion_B, width = 8, height = 6, dpi = 300)
+
+Unifrac_Pase_B <- plot_ordination(new_ps_B, ord_nmds_unifrac_B, shape="Dilucion", color="Pase", title="NMDS Unifrac Comunidad B") +
+  geom_point(size = 3, alpha = 0.7) +
+     geom_point(
+    data = function(df) df[grepl(destacados, rownames(df)), ],
+    size = 6, 
+    stroke = 1, 
+    color = "red", 
+    shape = 21, 
+    fill = NA
+  ) +
+  scale_shape_manual(values = c(0:9)) +
+  scale_color_manual(values = c("blue", "green", "purple", "orange", "pink", "cyan", "black"))+
+  guides(color = guide_legend(nrow = 6), shape = guide_legend(nrow = 6)) +
+  labs(color = "Pase", shape = "Dilución") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+ggsave("graficos/ComunidadB/Unifrac_Pase_B .png", plot = Unifrac_Pase_B, width = 8, height = 6, dpi = 300)
+
+
+Unifrac_paneles_B <-  (Unifrac_Dilucion_B |Unifrac_Pase_B) +
+  plot_annotation(
+    tag_levels = 'A',
+    tag_prefix = "",
+    tag_suffix = ") "
+  )
+
+ggsave("graficos/ComunidadB/Unifrac_paneles_B.png", Unifrac_paneles_B, width = 14, height = 6, dpi = 300)
+
+```
+
+### Análisis de Redundancia - Comunidad-B - Unifrac {#redundancia-uni-B}
+
+Se aplica un dbRDA con distancias Unifrac en su versión parcial, modelando la composición de las muestras de la comunidad B en función de Pase mientras se controla el efecto de Dilución y  también modelando la composición de las muestras en función de Dilución mientras se controla por Pase.
+
+```{r}
+
+Uni_B <- phyloseq::distance(new_ps_B, method = "unifrac", weighted = TRUE)
+meta_Uni_B <- data.frame(sample_data(new_ps_B))
+meta_Uni_B$Dilucion <- as.numeric(meta_Uni_B$Dilucion)
+meta_Uni_B$Pase <- as.numeric(meta_Uni_B$Pase)
+
+mod_db_uni_B<- capscale(Uni_B ~ Pase + Condition(Dilucion), data = meta_Uni_B)
+anova(mod_db_uni_B)    
+summary(mod_db_uni_B)
+RsquareAdj(mod_db_uni_B)
+
+mod_db_uni_Dil_B<- capscale(Uni_B ~ Dilucion + Condition(Pase), data = meta_Uni_B)
+anova(mod_db_uni_Dil_B) 
+summary(mod_db_uni_Dil_B)
+RsquareAdj(mod_db_uni_Dil_B)
+
+```
+
+## Composición Microbiana - Comunidad-C - Unifrac {#composicion-uni-C}
+
+Se representa la composición microbiana de las muestras de la comunidad C, mediante el método NMDS  utilizando distancias Unifrac, separando los datos por Pase y Dilución, y agrupándolos visualmente según estas variables.
+
+```{r}
+
+# ========================================================================
+# NMDS-Unifrac Comunidad C
+# ========================================================================
+
+set.seed(123)
+ord_nmds_unifrac_C <- ordinate(new_ps_C, method = "NMDS", distance = "Unifrac", weighted=TRUE)      
+
+
+Unifrac_Dilucion_C <- plot_ordination(new_ps_C, ord_nmds_unifrac_C, shape="Pase", color="Dilucion", title=" NMDs Unifrac Comunidad C ") +
+  geom_point(size = 3, alpha = 0.7) +
+     geom_point(
+    data = function(df) df[grepl(destacados, rownames(df)), ],
+    size = 6, 
+    stroke = 1, 
+    color = "red", 
+    shape = 21, 
+    fill = NA
+  ) +
+  scale_shape_manual(values = c(0:9)) +
+  scale_color_manual(values = c("blue", "green", "purple", "orange", "pink", "cyan", "black"))+
+  guides(color = guide_legend(nrow = 6), shape = guide_legend(nrow = 6)) +
+  labs(color = "Dilución", shape = "Pase") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+
+ggsave("graficos/ComunidadC/Unifrac_Dilucion_C .png", plot = Unifrac_Dilucion_C, width = 8, height = 6, dpi = 300)
+
+Unifrac_Pase_C <- plot_ordination(new_ps_C, ord_nmds_unifrac_C, shape="Dilucion", color="Pase", title="NMDs Unifrac Comunidad C") +
+   geom_point(size = 3, alpha = 0.7) +
+     geom_point(
+    data = function(df) df[grepl(destacados, rownames(df)), ],
+    size = 6, 
+    stroke = 1, 
+    color = "red", 
+    shape = 21, 
+    fill = NA
+  ) +
+  scale_shape_manual(values = c(0:9)) +
+  scale_color_manual(values = c("blue", "green", "purple", "orange", "pink", "cyan", "black"))+
+  guides(color = guide_legend(nrow = 6), shape = guide_legend(nrow = 6)) +
+  labs(color = "Pase", shape = "Dilución") +
+  theme_minimal() +
+  theme(
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)),
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+
+
+ggsave("graficos/ComunidadC/Unifrac_Pase_C .png", plot = Unifrac_Pase_C, width = 8, height = 6, dpi = 300)
+
+
+Unifrac_paneles_C <-  (Unifrac_Dilucion_C |Unifrac_Pase_C) +
+  plot_annotation(
+    tag_levels = 'A',
+    tag_prefix = "",
+    tag_suffix = ") "
+  )
+
+ggsave("graficos/ComunidadC/Unifrac_paneles_C.png", Unifrac_paneles_C, width = 14, height = 6, dpi = 300)
+
+```
+
+### Análisis de Redundancia - Comunidad-C - Unifrac {#redundancia-uni-C}
+
+Se aplica un dbRDA con distancias Unifrac en su versión parcial, modelando la composición de las muestras de la comunidad C en función de Pase mientras se controla el efecto de Dilución y  también modelando la composición de las muestras en función de Dilución mientras se controla por Pase.
+
+```{r}
+
+Uni_C <- phyloseq::distance(new_ps_C, method = "unifrac", weighted = TRUE)
+
+meta_Uni_C <- data.frame(sample_data(new_ps_C))
+meta_Uni_C$Dilucion <- as.numeric(meta_Uni_C$Dilucion)
+meta_Uni_C$Pase <- as.numeric(meta_Uni_C$Pase)
+
+mod_db_uni_C<- capscale(Uni_C ~ Pase + Condition(Dilucion), data = meta_Uni_C)
+anova(mod_db_uni_C)             
+summary(mod_db_uni_C)
+RsquareAdj(mod_db_uni_C)
+
+mod_db_uni_Dil_C<- capscale(Uni_C ~ Dilucion + Condition(Pase), data = meta_Uni_C)
+anova(mod_db_uni_Dil_C) 
+summary(mod_db_uni_Dil_C)
+RsquareAdj(mod_db_uni_Dil_C)
+
+```
+
+### Creación de Paneles de NMDS Unifrac {#paneles-Unifrac}
+
+Aquí se juntan los distintos NMDS de distancias Unifrac para crear los paneles finales. 
+
+```{r}
+
+Unifrac_paneles_Dilucion <- (Unifrac_Dilucion_A | Unifrac_Dilucion_B| Unifrac_Dilucion_C) +
+  plot_annotation(
+    tag_levels = "A",
+    tag_prefix = "",
+    tag_suffix = ")")  & theme(
+    legend.position = "right",
+    legend.title = element_text(size = 14),
+    legend.text  = element_text(size = 12))
+
+Unifrac_paneles_Dilucion <- Unifrac_paneles_Dilucion + plot_layout(guides = "collect")
+
+
+ggsave("graficos/Unifrac_paneles_Dilucion.png", 
+       Unifrac_paneles_Dilucion, width = 14, height = 6, dpi = 300)
+
+ggsave("graficos/uni_paneles_Dilucion_A4_landscape.png",
+       Unifrac_paneles_Dilucion,
+       width = 29.7, height = 21.0, units = "cm",
+       dpi = 300, bg = "white")
+
+Unifrac_paneles_Pase <- (Unifrac_Pase_A | Unifrac_Pase_B| Unifrac_Pase_C) +
+  plot_annotation(
+    tag_levels = "A",
+    tag_prefix = "",
+    tag_suffix = ")")   & theme(
+    legend.position = "right",
+    legend.title = element_text(size = 14),
+    legend.text  = element_text(size = 12))
+
+Unifrac_paneles_Pase <- Unifrac_paneles_Pase + plot_layout(guides = "collect")
+
+
+ggsave("graficos/Unifrac_paneles_Pase.png", 
+      Unifrac_paneles_Pase, width = 14, height = 6, dpi = 300)
+
+ggsave("graficos/uni_paneles_Pase_A4_landscape.png",
+       Unifrac_paneles_Pase,
+       width = 29.7, height = 21.0, units = "cm",
+       dpi = 300, bg = "white")
+
+```
