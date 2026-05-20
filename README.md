@@ -2,7 +2,7 @@
 Este repositorio recoge los scripts desarrollados para la tesis doctoral: "Dinámica de ensamblaje del microbioma rizosférico del tomate".
 ----------
 
-## Descripción de los _scripts_
+## Descripción de las carpetas
 
 **Scripts Comunes**
 En esta carpeta se encuentran los scripts utilizados en todos los capítulos. 
