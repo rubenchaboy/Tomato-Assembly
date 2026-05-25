@@ -2,7 +2,11 @@
 
 El objetivo de este capítulo fue determinar cómo evolucionan temporalmente las comunidades microbianas de la rizosfera de tomate. Para ello se ha diseñado un estudio en el que se analizará la variación de estas comunidades realizando mediciones en intervalos de tiempo pequeños. De esta forma, se podrá monitorizar en detalle los cambios significativos que se producen en las comunidades durante los primeros días de desarrollo de la planta.
 
-![Diseño temporal](imagenes/diseño_temporal.svg)
+
+
+<p align="center">
+  <img src="imagenes/diseño_temporal.svg" alt="Diseño temporal">
+</p>
 
 **Procesamiento Previo**
 
