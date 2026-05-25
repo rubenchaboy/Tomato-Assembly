@@ -1,0 +1,1380 @@
+---
+title: "Script capítulo Temporal"
+author: "Ruben"
+date: "2025-07-11"
+output: html_document
+---
+
+<style>
+hr {
+  border: 0;
+  height: 8px;        
+  background: #000;   
+  margin: 20px 0;     
+}
+</style>
+
+# Tabla de contenidos
+
+1. [Carga de librerías](#librerias)
+
+2. [Preparación de los datos](#datos)
+
+3. [Eliminación de controles y muestras no representativas](#controles)
+
+4. [Eliminación de secuencias no bacterianas](#nobacterias)
+
+5. [Eliminación de outliers](#outliers)
+
+6. [Correción de NAs](#nas)
+
+7. [Subsamplear](#subsampleo)
+
+8. [Guardado y carga](#guardado)
+
+9. [Análisis de diversidad y correlaciones](#analisis-diversidad)
+
+10. [Creación de las variables de trabajo](#creacion)
+
+11. [Resumen de variables de trabajo](#resumen)
+
+12. [Representación de las variables de trabajo](#representacion)
+
+13. [Análisis estadístico de Tiempo y Comunidad ](#analisis-estadistico)
+
+14. [Efecto de Riqueza y la diversidad de filogenética sobre Carga y Peso](#correlacion)
+
+15. [Análisis filogenético](#analisis-filogenetico)
+
+    1. [Top 10 familias](#top-familias)
+
+    2. [Efeto del tiempo sobre la abundanica de los taxones](#tiempo-taxones)
+
+16. [Análisis de la composición](#analisis-composicion)
+
+    1. [Composición Microbiana - Bray-Curtis](#composicion-bray)
+
+    2. [Composición Microbiana por Comunidad - Bray-Curtis](#composicion-comunidad-bray)
+
+    3. [Análisis de redundancia - Bray-Curtis](#redundancia-bray)
+
+    4. [Composición Microbiana - Unifrac](#composicion-unifrac)
+
+    5. [Composición Microbiana por Comunidad - Unifrac](#composicion-comunidad-unifrac)
+
+    6. [Análisis de redundancia - Unifrac](#redundancia-unifrac)
+
+    7. [Análisis de la evolución de la disimilitud intra-Comunidad lo largo del tiempo con distancias Bray-Curtis](#disimilitud-bray)
+
+    8. [Análisis de la evolución de la disimilitud intra-Comunidad lo largo del tiempo con distancias Unifrac](#disimiliud-unifrac)
+
+## Carga de librerías y datos {#librerias}
+
+Se cargan las librerías que se van a utilizar en el estudio.Se cargan los datos que provienen de seguir el procesado de secuencias siguiendo el flujo estándar del paquete DADA2. Estos datos contienen la tabla de abundancias de ASVs por muestra así como su asignación taxonómica. 
+
+```{r}
+knitr::opts_knit$set(root.dir = getwd())
+suppressMessages(suppressWarnings({
+datos <- "dada2multithreads.RData"
+suppressPackageStartupMessages({
+library(dada2)
+library(ggplot2)
+library(here)
+library(phyloseq)
+library(microbiome)
+library(dplyr)
+library(writexl)
+library(readxl)
+library(openxlsx)
+library(gridExtra)
+library(patchwork)
+library(Biostrings)
+library(tidyr)
+library(tibble)
+library(vegan)
+library(scales)
+library(car)
+library(officer)
+library(flextable)
+library(patchwork)
+library(broom)
+library(pheatmap)
+library(picante)
+library(reshape2)
+library(ppcor)
+library(lmtest)
+library(sandwich)
+library(forcats)
+library(Maaslin2)})
+theme_set(theme_bw())
+load(here("data",datos)) })) 
+
+dir.create("test")
+dir.create("graficos")
+out_graf <- "graficos"
+if (!dir.exists(out_graf)) dir.create(out_graf)
+
+```
+
+## Preparación de los datos {#datos}
+  
+1.	Se importan todos los datos del experimento (contenidos en un fichero Excel).
+2.	Creación del objeto phyloseq.
+
+```{r}
+samdf <- read_excel("metadata_Temp.xlsx")
+samdf <- as.data.frame(samdf)
+
+
+rownames(samdf) <- samdf$Nombre
+
+ps <- phyloseq(otu_table(seqtab_nochim, taxa_are_rows = FALSE), 
+               sample_data(samdf), 
+               tax_table(tax))
+
+```
+
+### Eliminación de controles y muestras no representativas {#controles}
+
+Se eliminan de nuestros datos aquellas muestras que corresponden a controles, ya sean controles negativos de planta (CN), controles de extracción de ADN (Cext) y controles negativos de PCR (NegPCR). También eliminamos aquellas muestras que se obtuvieron de plantas que no crecieron correctamente. 
+
+```{r}
+
+ps_nocontrol <- subset_samples(ps, !(Comunidad %in% c("CN", "Cext", "NegPCR"))& 
+                 Observaciones %in% c("HONGO", "OK"))
+
+```
+
+
+### Eliminación de secuencias no bacterianas {#nobacterias}
+
+Eliminación de aquellas secuencias correspondientes a mitocondrias, cloroplastos y eucariotas. Esto es debido a que los primers elegidos pueden secuenciar el 16S de estos orgánulos. 
+
+```{r}
+print("Inicial:")
+ps_nocontrol
+inicial<-sum(otu_table(ps_nocontrol))
+print ("Aqui vamos a quitar cloroplastos, mitocondrias y eucariotas")
+ps_nocontrol_filtrado<- subset_taxa(ps_nocontrol, Class!="Chloroplast")
+sin_cloroplastos<-sum(otu_table(ps_nocontrol_filtrado))
+ps_nocontrol_filtrado <- subset_taxa(ps_nocontrol_filtrado, Family!="Mitochondria")
+sin_mitocondrias<-sum(otu_table(ps_nocontrol_filtrado))
+ps_nocontrol_filtrado <- subset_taxa(ps_nocontrol_filtrado, Kingdom!="Eukaryota")
+sin_eucariotas<-sum(otu_table(ps_nocontrol_filtrado))
+valores<-c(inicial,sin_cloroplastos,sin_mitocondrias,sin_eucariotas)
+print("inicial,sin_cloroplastos,sin_mitocondrias,sin_eucariotas")
+print(valores)
+print(paste0("Total inicial= ",inicial))
+print(paste0("  quitando cloroplastos= ",sin_cloroplastos))
+print(paste0("  quitando cloroplastos y mitocondrias= ",sin_mitocondrias))
+print(paste0("  quitando cloroplastos, mitocondrias y eucariotas= ",sin_eucariotas))
+print("Filtrado:")
+ps_nocontrol_filtrado
+
+suppressMessages(summarize_phyloseq(ps_nocontrol_filtrado))
+```
+
+
+### Eliminación de outliers {#outliers}
+
+En análisis previos se observa que algunas muestras de la comunidad E tienen una composición microbiana muy diferente a las del resto de esa comunidad. Se calcula las 10 familias más abundantes de estas muestras y se comparan con las de otras muestras para corroborar esa diferencia. Se desconocen las razones de por qué estas muestras salieron mal, pero dado que  su perfil es muy diferente al del resto se eliminan del estudio con el fin de evitar que sesguen los resultados. 
+
+```{r}
+
+# Filtrar solo Comunidad E
+ps_E <- subset_samples(ps_nocontrol_filtrado, Comunidad == "E")
+
+# Agregar a nivel de Familia
+ps_familia_E <- tax_glom(ps_E, taxrank = "Family")
+
+# Pasar a abundancias relativas
+ps_familia_E_rel <- transform_sample_counts(ps_familia_E, function(x) x / sum(x))
+
+# Convertir a data.frame
+df_familia_E <- as.data.frame(psmelt(ps_familia_E_rel))
+df_familia_E$Family <- as.character(df_familia_E$Family)
+
+# Sumar abundancias por familia
+df_familia_suma_E <- df_familia_E %>%
+  group_by(Family) %>%
+  summarise(Total = sum(Abundance), .groups = "drop") %>%
+  arrange(desc(Total))
+
+# Seleccionar top 10 familias
+top10_familias_E <- df_familia_suma_E$Family[1:10]
+
+# Filtrar y preparar para plot
+df_top10_E <- df_familia_E %>%
+  filter(Family %in% top10_familias_E) %>%
+  group_by(Sample, Family) %>%
+  summarise(Abundancia = sum(Abundance) * 100, .groups = "drop")
+
+# Gráfico
+Plot_top10_E <- ggplot(df_top10_E, aes(x = Sample, y = Abundancia, fill = Family)) +
+  geom_bar(stat = "identity") +
+  theme_bw() +  
+  ylab("Abundancia relativa (%)") +
+  xlab("Muestras") +
+  ggtitle("Top 10 familias - Comunidad E") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave("graficos/top10_familias_ComunidadE.png",
+       plot = Plot_top10_E,
+       width = 8, height = 6, dpi = 300)
+
+outliers <- c("Temp_E_7_1_S219", "Temp_E_5_1_S146", "Temp_E_8_1_S4")
+
+ps_nocontrol_filtrado_2 <- subset_samples(ps_nocontrol_filtrado, !(sample_names(ps_nocontrol_filtrado) %in% outliers))
+
+```
+
+
+### Correción de NAs {#nas}
+
+Aquellas muestras que tienen valores de MPN como NA, por no haber crecido las bacterias correspondientes a esas muestras, o por estar por debajo del límite de detección (<110000 MPN/mL) se transforman a  este valor de límite de detección, 220000 MPN por planta. 
+
+1. Se reemplazan los valores de texto "NA" por valores faltantes, cuyo código es NA, pero no en formato texto como se encuentran en la hoja de datos original. 
+
+2. Se convierte la columna MPN a tipo numérico.
+
+3. Se reemplazan los valores NA (faltantes) en la columna MPN con 220000
+
+4. Se convierten todos los valores menores que 110000 en la columna MPN a 220000
+
+
+En el caso del peso seco aquellas muestras que tienen valores NA (por no haber crecido lo suficiente la parte aérea) se les asocia un valor de 0 gramos. 
+
+1. Se reemplazan los valores de texto "NA" por valores  NA (faltantes).
+
+2. Se convierte la columna Peso a tipo numérico.
+
+3. Se reemplazan los valores NA (faltantes) en la columna Peso con 0.
+
+```{r}
+
+sample_data(ps_nocontrol_filtrado_2)$MPN[sample_data(ps_nocontrol_filtrado_2)$MPN == "NA"] <- NA
+sample_data(ps_nocontrol_filtrado_2)$MPN <- as.numeric(sample_data(ps_nocontrol_filtrado_2)$MPN)
+sample_data(ps_nocontrol_filtrado_2)$MPN[is.na(sample_data(ps_nocontrol_filtrado_2)$MPN)] <- 220000
+sample_data(ps_nocontrol_filtrado_2)$MPN[sample_data(ps_nocontrol_filtrado_2)$MPN < 220000] <- 220000
+
+sample_data(ps_nocontrol_filtrado_2)$Peso_Seco[sample_data(ps_nocontrol_filtrado_2)$Peso_Seco == "NA"] <- NA
+sample_data(ps_nocontrol_filtrado_2)$Peso_Seco <- as.numeric(sample_data(ps_nocontrol_filtrado_2)$Peso_Seco)
+sample_data(ps_nocontrol_filtrado_2)$Peso_Seco[is.na(sample_data(ps_nocontrol_filtrado_2)$Peso_Seco)] <- 0
+
+```
+
+## Subsamplear {#subsampleo}
+
+Se representa en una gráfica el número de secuencias por muestra para saber a cuánto subsamplear. Se utiliza una seed fija, 134. 
+
+```{r}
+
+sort(sample_sums(ps_nocontrol_filtrado_2), decreasing = TRUE)
+
+suppressMessages(suppressWarnings({
+  set.seed(134)  
+  ps_nocontrol_filtrado_rare <- rarefy_even_depth(ps_nocontrol_filtrado_2, sample.size = 24562, trimOTUs = TRUE)
+}))
+
+png("graficos/profundidad_secuenciacion.png", width = 800, height = 600)
+
+plot(
+  sort(sample_sums(ps_nocontrol_filtrado_2)),
+  ylab = "Profundidad de secuenciación",
+  xlab = "Muestras ordenadas por profundidad",
+  main = "Profundidad de secuenciación por muestra",
+  cex.lab = 1.6,   
+  cex.axis = 1.4,   
+  cex.main = 1.8    
+)
+
+abline(h = 24562, col = "red", lwd = 2)
+
+dev.off()
+
+```
+
+## Guardado y carga {#guardado}
+
+Guardado del objeto phylosec y carga de datos con la distancia filogenética.
+
+
+```{r}
+
+saveRDS(ps_nocontrol_filtrado_rare, "ps_nocontrol_filtrado_rare.rds")
+#En otro script partiendo del objeto phyloseq anterior se "mapean" sus sequencias contra una base de datos de referencia con árbol y taxonomía asociados (ej. greengenes2). De esta forma se incluye el árbol filogenético en el objeto y se pueden realizar análisis mediante medidas filogenéticas (ej.: Faith, unifrac,...)
+nuevosdatos <- "phyloseq_objects_with_tree.Rdata"
+
+load(here("data",nuevosdatos ))
+
+```
+
+---
+
+# **Análisis de diversidad y correlaciones** {#analisis-diversidad} 
+
+## Creación de las variables de trabajo {#creacion}
+
+```{r}
+
+datos_est <- as(sample_data(ps_nocontrol_filtrado_rare), "data.frame")
+datos_est$log_MPN <- log10(datos_est$MPN)
+
+Riqueza <- estimate_richness(ps_nocontrol_filtrado_rare, measures = "Observed")
+Homogeneidad <- estimate_richness(ps_nocontrol_filtrado_rare, measures = "Shannon")
+
+Faith_D <- pd(as(otu_table(new_ps), "matrix"), phy_tree(new_ps))
+datos_est$Riqueza <- Riqueza[rownames(datos_est), "Observed"]
+datos_est$Homogeneidad <- Homogeneidad[rownames(datos_est), "Shannon"]
+datos_est$Faith_D <- Faith_D[rownames(datos_est), "PD"]
+
+# Aseguramos los tipos de variable
+
+datos_est$Comunidad   <- factor(datos_est$Comunidad)   # factor sin orden
+datos_est$Tiempo  <- as.integer(datos_est$Tiempo)  # 1..8
+# Versión centrada y escalada del tiempo para estabilidad numérica
+datos_est$cTiempo <- as.numeric(scale(datos_est$Tiempo, center = TRUE, scale = TRUE))
+
+# Recomendación de contrastes (sum-to-zero) para interpretaciones estables en diseños desbalanceados. Codifica los factores de forma que la media de todos los niveles sea el intercepto y los coeficientes sean desviaciones respecto a esa media (en lugar de compararlos con un nivel de referencia). Esto da resultados más estables y fáciles de interpretar en diseños desbalanceados.
+options(contrasts = c("contr.sum", "contr.poly"))
+
+```
+
+### Representación de las variables de trabajo {#representacion}
+
+Se representan los valores de las variables de trabajo por Comunidad y Tiempo.
+
+```{r}
+
+# Medias ± error por (Tiempo, Comunidad)
+
+vars <- c("log_MPN", "Peso_Seco", "Riqueza", "Homogeneidad", "Faith_D")
+
+lista_graficos <- list()
+
+for (v in vars) {
+  # Resumen por Comunidad × Tiempo
+  df_mean <- datos_est %>%
+    group_by(Comunidad, Tiempo) %>%
+    summarise(
+      n    = n(),
+      mean = mean(.data[[v]], na.rm = TRUE),
+      sd   = sd(.data[[v]],   na.rm = TRUE),
+      se   = sd / sqrt(n),
+      .groups = "drop"
+    )
+
+  # Gráfico: medias ± SE por Tiempo y Comunidad
+  p <- ggplot(df_mean, aes(x = Tiempo, y = mean, color = Comunidad, group = Comunidad)) +
+    geom_line(size = 1) +
+    geom_point(size = 2) +
+    geom_errorbar(aes(ymin = mean - se, ymax = mean + se), width = 0.15) +
+    labs(
+      x = "Tiempo",
+      y = ifelse(v == "Riqueza", "Riqueza observada",
+      ifelse(v == "Peso_Seco", "Peso_Seco (g)",
+      ifelse(v == "Faith_D", "Diversidad", v))) 
+  ) +
+    theme_bw()+
+      scale_x_continuous(breaks = unique(df_mean$Tiempo))+
+  theme(
+    axis.text.x = element_text(size = 10, angle = 0, hjust = 1),  
+    axis.text.y = element_text(size = 10),
+    axis.title.x = element_text(size = 10, face = "bold"),         
+    axis.title.y = element_text(size = 10, face = "bold"),
+    legend.text = element_text(size = 10),
+    legend.title = element_text(size = 12, face="bold"),
+    plot.title   = element_text(size = 12, face = "bold", hjust = 0.5) 
+  )
+
+
+    lista_graficos[[v]] <- p
+
+  fn <- file.path(out_graf, paste0( "medias_SE_", v, ".png"))
+  ggsave(filename = fn, plot = p, width = 7, height = 5, dpi = 300)
+
+  message("Guardado: ", fn)
+}
+
+panel <- (
+  lista_graficos[["log_MPN"]] + labs(title = NULL) +
+  lista_graficos[["Peso_Seco"]] + labs(title = NULL)
+) +
+  plot_annotation(tag_levels = "A", tag_suffix = ") ") & 
+  theme(legend.position = "right")
+
+panel <- panel + plot_layout(guides = "collect")
+
+
+ggsave("graficos/medias_SE_logMPN_PesoSeco.png",
+       plot = panel,
+       width = 10, height = 5, dpi = 300)
+
+
+panel <- (
+  lista_graficos[["Riqueza"]] + labs(title = NULL) +
+  lista_graficos[["Homogeneidad"]] + labs(title = NULL)
+) +
+  plot_annotation(tag_levels = "A", tag_suffix = ") ") & 
+  theme(legend.position = "right")
+
+panel <- panel + plot_layout(guides = "collect")
+
+
+ggsave("graficos/medias_SE_Riqueza_Homogeneidad.png",
+       plot = panel,
+       width = 10, height = 5, dpi = 300)
+
+```
+
+### Análisis estadístico de Tiempo y Comunidad  {#analisis-estadistico}
+
+Se analiza estadísticamente el efecto de Tiempo, Comunidad y su interacción sobre las variables de trabajo.
+
+```{r}
+
+vars <- c("log_MPN", "Peso_Seco", "Riqueza", "Homogeneidad", "Faith_D")
+mods <- list()
+
+datos_est$Comunidad <- relevel(datos_est$Comunidad, ref = "A")
+contrasts(datos_est$Comunidad)
+#Comunidad 1 es la comunidad A y así sucesivamente.
+
+
+pdf("Resultados_Comunidad_Graficos.pdf", width = 12, height = 8)
+for (y in vars) {
+  cat("\n\n====================================================\n")
+  cat("Respuesta:", y, "\n")
+  form <- as.formula(paste0(y, " ~ cTiempo * Comunidad"))
+  fit  <- lm(form, data = datos_est)
+  mods[[y]] <- fit
+  
+  cat("\n--- SUMMARY (coeficientes individuales vs. referencia) ---\n")
+  print( lmtest::coeftest(fit, vcov = sandwich::vcovHC(fit, type = "HC3"))
+)
+  
+  cat("\n--- ANOVA global (Type III de base R) ---\n")
+  print(Anova(fit,type = 3, white.adjust = "hc3"))
+  
+  # Gráficos de diagnóstico 
+  par(mfrow=c(2,2))
+  plot(fit, main = y)
+  par(mfrow=c(1,1))
+}
+
+
+for (v in vars) {
+  cat("\n====================================================\n")
+  cat("Variable:", v, "\n")
+  
+  m <- mods[[v]]  # recupera el modelo
+  residuales <- residuals(m)
+  
+  # Test de normalidad de residuales (Shapiro-Wilk)
+  cat("\n--- Shapiro-Wilk (normalidad de residuales) ---\n")
+  if (length(residuales) <= 5000) {
+    print(shapiro.test(residuales))
+  } else {
+    cat("Demasiadas observaciones para Shapiro (>5000), omitiendo test.\n")
+  }
+  
+  # Test de homogeneidad de varianzas entre Comunidades (Levene)
+  cat("\n--- Levene (varianzas residuales entre Comunidades) ---\n")
+  print(leveneTest(residuales ~ datos_est$Comunidad))
+  
+  # Test de heterocedasticidad de Breusch-Pagan
+  cat("\n--- Breusch-Pagan (heterocedasticidad del modelo) ---\n")
+  print(lmtest::bptest(m))
+}
+
+dev.off()
+
+```
+
+### Efecto de Riqueza y la diversidad filogenética sobre Carga y Peso {#correlacion}
+
+Se calcula el efecto de Riqueza y la diversidad filogenética sobre Carga y Peso. Primero se analiza si existe una correlación entre ambas variables y, en caso de detectarse, se calcula la fracción de la diversidad filogenética que es independiente de Riqueza. A continuación, se calculan los efectos de Riqueza y la fracción de la diversidad filogenética independiente de Riqueza sobre Carga y Peso. 
+
+```{r}
+
+# 1) Exploración inicial ---------------------------------------------------
+# Scatterplot de Riqueza vs Faith_D con smoothing y recta para ver linealidad
+png("graficos/riqueza_vs_faith.png", width = 800, height = 600)
+
+par(mar = c(5, 6.5, 4, 2) + 0.1,   
+    mgp = c(2.5, 0.8, 0))          
+
+plot(datos_est$Riqueza, datos_est$Faith_D,
+     xlab = "Riqueza", ylab = "Diversidad",
+     main = "Riqueza frente a Diversidad",
+     cex.lab = 1.8,   
+     cex.axis = 1.6,  
+     cex.main = 2.2,  
+     cex = 1.2,       
+     pch = 20, col = "grey30")
+
+lines(lowess(datos_est$Riqueza, datos_est$Faith_D), col = "blue")
+abline(lm(Faith_D ~ Riqueza, data = datos_est), col = "red", lwd = 2)
+
+dev.off()
+
+# Correlación (numérico)
+res_cor <- cor.test(datos_est$Riqueza, datos_est$Faith_D, method = "pearson")
+print(res_cor)          
+res_cor$estimate        
+res_cor$p.value          
+
+
+# 2) Residualizar Faith_D respecto a Riqueza (fracción de la diversidad de Faith independiente de Riqueza ) ----
+m_FD_vs_r <- lm(Faith_D ~ Riqueza, data = datos_est)
+datos_est$FD_resid <- resid(m_FD_vs_r)   
+
+# 3) Modelos con la fracción de la diversidad de Faith independiente de Riqueza
+
+lm_Peso_resid <- lm(Peso_Seco ~ Riqueza + FD_resid, data = datos_est)
+cat("Resumen modelo final (Peso_Seco ~ Riqueza + FD_resid):\n")
+print(summary(lm_Peso_resid))
+print(Anova(lm_Peso_resid, type = "II"))
+lmtest::bptest(lm_Peso_resid)
+
+lm_MPN_resid <- lm(log_MPN ~ Riqueza + FD_resid, data = datos_est)
+cat("Resumen modelo final (log_MPN ~ Riqueza + FD_resid):\n")
+print(summary(lm_MPN_resid))
+print(Anova(lm_MPN_resid, type = "II"))
+lmtest::bptest(lm_MPN_resid)
+
+```
+
+
+# **Análisis filogenético** {#analisis-filogenetico}
+
+## Top 10 familias {#top-familias}
+
+Se calculan las 10 familias más abundantes.
+
+```{r}
+
+# Al haber rarificado se realiza de la siguiente manera 
+ps_familia <- tax_glom(ps_nocontrol_filtrado_rare, taxrank = "Family")
+ps_familia_rel <- transform_sample_counts(ps_familia, function(x) x / sum(x))
+
+
+#Añadir "Otros" al gráfico
+df <- phyloseq::psmelt(ps_familia_rel) |>
+  mutate(
+    Family = as.character(Family),
+    Family = ifelse(is.na(Family) | Family == "", "Unassigned", Family),
+    Family_plot = forcats::fct_lump_n(Family, n = 10, w = Abundance, other_level = "Otros")
+  )
+
+
+# Sumar por muestra (Top 10) y añadir "Otros", ordenar la leyenda
+per_sample <- df |>
+  group_by(Sample, Comunidad, Tiempo, Family_plot) |>
+  summarise(Abund_rel = sum(Abundance), .groups = "drop")
+
+# Resumir para el plot: media por Comunidad x Tiempo x Family_plot
+familia_plot <- per_sample |>
+  group_by(Comunidad, Tiempo, Family_plot) |>
+  summarise(NormalizedAbundance = mean(Abund_rel), .groups = "drop")
+
+#Reordenamos
+familia_plot <- familia_plot |>
+  mutate(
+    Family_plot = forcats::fct_reorder(Family_plot, NormalizedAbundance, .fun = mean, .desc = TRUE),
+    Family_plot = forcats::fct_relevel(Family_plot, "Otros", after = Inf))
+
+
+Top10_familias_otros <- ggplot(familia_plot, aes(x = factor(Tiempo), y = NormalizedAbundance, fill = Family_plot)) +
+  geom_bar(stat = "identity", position = "stack")  +
+  scale_fill_brewer(palette = "Set3") +
+    labs(title = "Top10 familias",
+       x = "Tiempo",
+       y = "Abundancia relativa",
+       fill = "Familia") +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "right",
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 12),
+    legend.title = element_text(size = 10, face = "bold")) +
+  facet_wrap(~ Comunidad, scales = "free_y", ncol = 3) 
+
+ggsave("graficos/Top10_Familias_otros.png",
+       plot = Top10_familias_otros, width = 12, height = 6, dpi = 300)
+
+```
+
+## Efecto del tiempo sobre la abundanica de los taxones {#tiempo-taxones}
+
+En este apartado se va a comprobar el efecto del tiempo sobre la abundancia de los diferentes Filos y Familias.
+
+```{r}
+
+# ============================================
+#  Análisis a nivel de Filo
+# ============================================
+
+ps_filo <- tax_glom(ps_nocontrol_filtrado_rare, taxrank = "Phylum", NArm = FALSE)
+ps_filo_rel <- transform_sample_counts(ps_filo, function(x) {
+  if (sum(x, na.rm = TRUE) > 0) x / sum(x, na.rm = TRUE) else x
+})
+
+#Estraer a tabla Otu
+otu_filo <- as.data.frame(otu_table(ps_filo_rel))
+
+# Transponer si es necesario
+
+if(taxa_are_rows(ps_filo_rel)) otu_filo <- as.data.frame(t(otu_filo))
+
+# Extraer taxonomía
+tax_filo <- as.data.frame(tax_table(ps_filo_rel))
+colnames(otu_filo) <- tax_filo$Phylum
+
+# Correr MaAsLin2 a nivel de Filo
+fit_filo <- Maaslin2(
+  input_data = otu_filo,
+  input_metadata = datos_est,
+  output = "maaslin2_Filo_Tiempo",
+  fixed_effects = c("Tiempo"),
+  random_effects = c("Comunidad"),
+  normalization = "NONE",
+  transform = "AST",
+  min_abundance = 0.0001,
+  min_prevalence = 0.1,
+  plot_heatmap = FALSE,
+  plot_scatter = FALSE
+)
+
+# Leer resultados
+maaslin_filo_res <- read.delim("maaslin2_Filo_Tiempo/all_results.tsv")
+colnames(maaslin_filo_res)[colnames(maaslin_filo_res) == "feature"] <- "Filo"
+maaslin_filo_sig <- maaslin_filo_res[maaslin_filo_res$qval < 0.05, ]
+maaslin_filo_sig$Direccion <- ifelse(maaslin_filo_sig$coef > 0, "↑ Aumenta", "↓ Disminuye")
+
+maaslin_filo_sig <- maaslin_filo_sig[order(-abs(maaslin_filo_sig$coef)), ]
+
+cat("========== FILO ==========\n")
+cat("Filos significativos (q < 0.05):", nrow(maaslin_filo_sig), "\n\n")
+print(maaslin_filo_sig[, c("Filo", "coef", "qval", "Direccion")])
+
+
+# ============================================
+#  Análisis a nivel de Familia
+# ============================================
+
+ps_familia <- tax_glom(ps_nocontrol_filtrado_rare, taxrank = "Family")
+
+ps_familia_rel <- transform_sample_counts(ps_familia, function(x) {
+  if (sum(x, na.rm = TRUE) > 0) x / sum(x, na.rm = TRUE) else x
+})
+
+
+#Extraer a tabla Otu
+otu_familia <- as.data.frame(otu_table(ps_familia_rel))
+
+# Transponer si es necesario
+
+if(taxa_are_rows(ps_familia_rel)) otu_familia <- as.data.frame(t(otu_familia))
+
+# Extraer taxonomía
+tax_familia <- as.data.frame(tax_table(ps_familia_rel))
+colnames(otu_familia) <- tax_familia$Family  
+
+
+# Correr Maaslin2
+
+fit_familia <- Maaslin2(
+  input_data = otu_familia,
+  input_metadata = datos_est,
+  output = "maaslin2_Familia_Tiempo",
+  fixed_effects = c("Tiempo"),
+  random_effects = c("Comunidad"),
+  normalization = "NONE",  
+  transform = "AST",       
+  min_abundance = 0.0001,
+  min_prevalence = 0.1,
+  plot_heatmap = FALSE,
+  plot_scatter = FALSE
+)
+
+# Leer resultados
+maaslin_familia_res <- read.delim("maaslin2_Familia_Tiempo/all_results.tsv")
+colnames(maaslin_familia_res)[colnames(maaslin_familia_res) == "feature"] <- "Familia"
+
+
+# Filtrar significativos
+maaslin_familia_sig <- maaslin_familia_res[maaslin_familia_res$qval < 0.05, ]
+maaslin_familia_sig$Direccion <- ifelse(maaslin_familia_sig$coef > 0, "↑ Aumenta", "↓ Disminuye")
+
+cat("Familias significativas (q < 0.05):", nrow(maaslin_familia_sig), "\n\n")
+print(maaslin_familia_sig[, c("Familia", "coef", "pval", "qval", "Direccion")])
+ # Familias que aumentan
+Familias_aumentan <- maaslin_familia_sig[maaslin_familia_sig$coef > 0, ]
+Familias_aumentan <- Familias_aumentan[order(-abs(Familias_aumentan$coef)), ]
+
+# Ver resultados
+print(Familias_aumentan[, c("Familia", "coef", "qval", "Direccion")])
+
+
+Familias_disminuyen <- maaslin_familia_sig[maaslin_familia_sig$coef < 0, ]
+Familias_disminuyen <- Familias_disminuyen[order(-abs(Familias_disminuyen$coef)), ]
+
+# Ver resultados
+print(Familias_disminuyen[, c("Familia", "coef", "qval", "Direccion")])
+
+
+# Crear lista con las hojas
+lista_resultados <- list(
+  "Filos_significativos" = maaslin_filo_sig,
+  "Aumentan" = Familias_aumentan,
+  "Disminuyen" = Familias_disminuyen)
+
+# Guardar en Excel
+write_xlsx(lista_resultados, "Resultados_Filo_Familia_Temporales.xlsx")
+
+```
+---
+
+# **Análisis de la composición** {#analisis-composicion} 
+
+## Composición Microbiana - Bray-Curtis {#composicion-bray}
+
+Aqui se representa la composición microbiana, mediante el método NMDS (Non-Metric Multidimensional Scaling) utilizando distancias Bray-Curtis, separando los datos por tipo de Comunidad y tiempo de muestreo, y agrupándolos visualmente según estas variables.
+
+```{r}
+
+# sample_data(ps_nocontrol_filtrado_rare)$Tiempo <- as.factor(sample_data(ps_nocontrol_filtrado_rare)$Tiempo)
+
+ps_prop <- transform_sample_counts(ps_nocontrol_filtrado_rare, function(otu) otu/sum(otu))
+set.seed(123)
+ord_nmds_bray <- ordinate(ps_prop, method="NMDS", distance="bray")
+
+#calcular dist primero como bray 
+bray_Comunidad <- plot_ordination(ps_prop, ord_nmds_bray, shape="Tiempo", color="Comunidad", title="") +
+  stat_ellipse(aes(color=Comunidad, group=Comunidad), level=0.95, linetype="solid", linewidth=1) +   
+  geom_point() +  
+  scale_shape_manual(values = c(0:9)) + 
+  scale_color_manual(values = c("red", "blue", "green", "purple", "orange", "pink", "brown", "yellow", "cyan", "black")) +
+  guides(color = guide_legend(nrow = 5), shape = guide_legend(nrow = 5)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)))
+  
+ggsave("graficos/bray_Comunidad.png", plot = bray_Comunidad, width = 8, height = 6, dpi = 300)
+
+bray_tiempo <- plot_ordination(ps_prop, ord_nmds_bray, shape="Comunidad", color="Tiempo", title="") +
+  stat_ellipse(aes(color=Tiempo, group=Tiempo), level=0.95, linetype="solid", linewidth=1) +  
+  geom_point() +  
+  scale_shape_manual(values = c(0:9)) + 
+  scale_color_manual(values = c("red", "blue", "green", "purple", "orange", "pink", "brown", "yellow", "cyan", "black")) +
+  guides(color = guide_legend(nrow = 5), shape = guide_legend(nrow = 5)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)))
+  
+ggsave("graficos/bray_tiempo.png", bray_tiempo, width = 8, height = 6, dpi = 300)
+
+bray_paneles <-  (bray_Comunidad | bray_tiempo) +
+  plot_annotation(
+    tag_levels = 'A',
+    tag_prefix = "",
+    tag_suffix = ") "
+  )
+
+ggsave("graficos/bray_paneles.png", bray_paneles, width = 14, height = 6, dpi = 300)
+
+```
+
+### Composición Microbiana por Comunidad - Bray-Curtis {#composicion-comunidad-bray}
+
+Aqui se representa la composición microbiana, mediante el método NMDS utilizando distancias Bray-Curtis, separando los datos por cada tipo de Comunidad y agrupándolos según el tiempo de muestreo.
+
+```{r}
+
+# ps_prop <- transform_sample_counts(ps_nocontrol_filtrado_rare, function(otu) otu/sum(otu))
+# set.seed(123)
+# ord_nmds_bray <- ordinate(ps_prop, method="NMDS", distance="bray")
+
+Comunidades <- unique(sample_data(ps_prop)$Comunidad)
+lista_graficos <- list()
+
+
+for (s in Comunidades) {
+  ps_Comunidad <- subset_samples(ps_prop, Comunidad == s)
+  set.seed(123)
+  ord_Comunidad <- ordinate(ps_Comunidad, method = "NMDS", distance = "bray")
+
+  Bray<- plot_ordination(ps_Comunidad, ord_Comunidad, shape = "Tiempo", color = "Tiempo", title = paste("NMDS Bray-Curtis - Comunidad", s)) +
+    stat_ellipse(aes(color = Tiempo, group = Tiempo), level = 0.95, linetype = "solid", linewidth = 1) +
+    geom_point(size = 3) +
+    scale_shape_manual(values = c(0:9)) +
+    scale_color_manual(values = c("red", "blue", "green", "purple", "orange", "pink", "brown", "yellow", "cyan", "black")) +
+    guides(color = guide_legend(nrow = 5), shape = guide_legend(nrow = 5)) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5),
+      plot.background = element_rect(fill = "white", color = NA),
+      panel.background = element_rect(fill = "white", color = NA),
+      strip.text = element_blank(),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)))
+  
+  file_nmds <- file.path(out_graf, paste0("Bray_comunidad_", s, ".png"))
+  ggsave(filename = file_nmds, plot =  Bray, width = 7, height = 5, dpi = 300)
+ 
+  lista_graficos[[s]] <- Bray
+
+  
+  message("Guardado: ", file_nmds)
+  
+}
+
+Bray_Comunidades_combinados <- wrap_plots(lista_graficos, ncol = 4) +
+  plot_annotation(
+    tag_levels = "A",
+    tag_suffix = ") "
+  )
+
+ggsave(file.path(out_graf, "Bray_comunidades_combinadas.png"),
+       plot = Bray_Comunidades_combinados,
+       width = 16, height = 12, dpi = 300)
+```
+
+### Análisis de Redundancia - Bray-Curtis {#redundancia-bray}
+
+Se aplica un análisis de redundancia basado en distancias (dbRDA con Bray–Curtis) en su versión parcial, modelando la composición de las muestras en función de Tiempo mientras se controla el efecto de Comunidad y  también modelando la composición de las muestras en función de Comunidad mientras se controla por Tiempo.
+
+```{r}
+
+Z <- as(otu_table(ps_prop), "matrix")
+if (taxa_are_rows(ps_prop)) Z <- t(Z)
+
+bray <- vegdist(Z, method = "bray")
+
+meta <- data.frame(sample_data(ps_prop))
+meta$Comunidad <- factor(meta$Comunidad)
+meta$Tiempo <- as.numeric(meta$Tiempo)
+
+mod_db_T <- capscale(bray ~ Tiempo + Condition(Comunidad), data = meta)
+anova(mod_db_T)        
+RsquareAdj(mod_db_T)
+
+mod_db_C <- capscale(bray ~ Comunidad + Condition(Tiempo), data = meta)
+anova(mod_db_C)        
+RsquareAdj(mod_db_C)
+
+```
+
+## Composición Microbiana - Unifrac {#composicion-unifrac}
+
+Aqui se representa la composición microbiana, mediante el método NMDS utilizando distancias Unifrac, separando los datos por tipo de Comunidad y tiempo de muestreo, y agrupándolos visualmente según estas variables.
+
+```{r}
+
+set.seed(123)
+ord_nmds_unifrac <- ordinate(new_ps, method = "NMDS", distance = "Unifrac", weighted=TRUE)      
+
+
+Unifrac_Comunidad <- plot_ordination(new_ps, ord_nmds_unifrac, shape="Tiempo", color="Comunidad", title="") +
+  stat_ellipse(aes(color=Comunidad, group=Comunidad), level=0.95, linetype="solid", linewidth=1) +  
+  geom_point() +  
+  scale_shape_manual(values = c(0:9)) + 
+  scale_color_manual(values = c("red", "blue", "green", "purple", "orange", "pink", "brown", "yellow", "cyan", "black")) +
+  guides(color = guide_legend(nrow = 5), shape = guide_legend(nrow = 5)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)))
+
+
+ggsave("graficos/Unifrac_Comunidad .png", plot = Unifrac_Comunidad, width = 8, height = 6, dpi = 300)
+
+Unifrac_Tiempo <- plot_ordination(new_ps, ord_nmds_unifrac, shape="Comunidad", color="Tiempo", title="") +
+  stat_ellipse(aes(color=Tiempo, group=Tiempo), level=0.95, linetype="solid", linewidth=1) +  
+  geom_point() +  
+  scale_shape_manual(values = c(0:9)) + 
+  scale_color_manual(values = c("red", "blue", "green", "purple", "orange", "pink", "brown", "yellow", "cyan", "black")) +
+  guides(color = guide_legend(nrow = 5), shape = guide_legend(nrow = 5)) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5),
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)))
+
+
+ggsave("graficos/Unifrac_Tiempo .png", plot = Unifrac_Tiempo, width = 8, height = 6, dpi = 300)
+
+
+Unifrac_paneles <-  (Unifrac_Comunidad |Unifrac_Tiempo) +
+  plot_annotation(
+    tag_levels = 'A',
+    tag_prefix = "",
+    tag_suffix = ") "
+  )
+
+ggsave("graficos/Unifrac_paneles.png", Unifrac_paneles, width = 14, height = 6, dpi = 300)
+
+```
+
+
+### Composición Microbiana por Comunidad - Unifrac {#composicion-comunidad-unifrac}
+
+Aqui representamos la composición Microbiana, mediante análisis NMDS utilizando distancias Unifrac, separando los datos por cada tipo de Comunidad y agrupándolos según el tiempo de muestreo.
+
+```{r}
+
+# ps_prop <- transform_sample_counts(ps_nocontrol_filtrado_rare, function(otu) otu/sum(otu))
+# ord_nmds_bray <- ordinate(ps_prop, method="NMDS", distance="bray")
+
+Comunidades <- unique(sample_data(ps_prop)$Comunidad)
+lista_graficos <- list()
+
+
+for (s in Comunidades) {
+  ps_Comunidad_new <- subset_samples(new_ps, Comunidad == s)
+  set.seed(123)
+  ord_Comunidad_new <- ordinate(ps_Comunidad_new, method = "NMDS",distance = "Unifrac", weighted=TRUE) 
+
+  Unifrac<- plot_ordination(ps_Comunidad_new, ord_Comunidad_new, shape = "Tiempo", color = "Tiempo", title = paste("NMDS Unifrac - Comunidad", s)) +
+    stat_ellipse(aes(color = Tiempo, group = Tiempo), level = 0.95, linetype = "solid", linewidth = 1) +
+    geom_point(size = 3) +
+    scale_shape_manual(values = c(0:9)) +
+    scale_color_manual(values = c("red", "blue", "green", "purple", "orange", "pink", "brown", "yellow", "cyan", "black")) +
+    guides(color = guide_legend(nrow = 5), shape = guide_legend(nrow = 5)) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5),
+      plot.background = element_rect(fill = "white", color = NA),
+      panel.background = element_rect(fill = "white", color = NA),
+      strip.text = element_blank(),
+    axis.text.x = element_text(angle = 0, hjust = 1, size = 10),
+    axis.text.y = element_text(size = 10),
+    legend.title = element_text(margin = margin(b = 10)))
+  
+  file_nmds <- file.path(out_graf, paste0("Unifrac_comunidad_", s, ".png"))
+  ggsave(filename = file_nmds, plot =  Unifrac, width = 7, height = 5, dpi = 300)
+ 
+  lista_graficos[[s]] <- Unifrac
+
+  
+  message("Guardado: ", file_nmds)
+  
+}
+
+Unifrac_Comunidades_combinados <- wrap_plots(lista_graficos, ncol = 4) +
+  plot_annotation(
+    tag_levels = "A",
+    tag_suffix = ") "
+  )
+
+ggsave(file.path(out_graf, "Unifrac_comunidades_combinadas.png"),
+       plot = Unifrac_Comunidades_combinados,
+       width = 16, height = 12, dpi = 300)
+
+```
+ 
+### Análisis de redundancia - Unifrac {#redundancia-unifrac}
+
+Se aplica un análisis de redundancia basado en distancias (dbRDA con Unifrac) en su versión parcial, modelando la composición de las muestras en función de Tiempo mientras se controla el efecto de Comunidad y y también modelando la composición de las muestras en función de Comunidad mientras se controla por Tiempo.
+
+```{r}
+# Z_new <- as(otu_table(new_ps), "matrix")
+# if (taxa_are_rows(new_ps)) Z_new <- t(Z_new)
+
+Uni <- phyloseq::distance(new_ps, method = "unifrac", weighted = TRUE)
+
+meta_Uni <- data.frame(sample_data(new_ps))
+meta_Uni$Comunidad <- factor(meta_Uni$Comunidad)
+meta_Uni$Tiempo <- as.numeric(meta_Uni$Tiempo)
+mod_db_uni<- capscale(Uni ~ Tiempo + Condition(Comunidad), data = meta_Uni)
+anova(mod_db_uni)             
+
+
+mod_db_uni_C<- capscale(Uni ~ Comunidad + Condition(Tiempo), data = meta_Uni)
+anova(mod_db_uni_C)             
+
+```
+
+
+## Análisis de la evolución de la disimilitud intra-Comunidad lo largo del tiempo con distancias Bray-Curtis {#disimilitud-bray}
+
+En este apartado se analiza la dinámica temporal de la composición microbiana utilizando la matriz de distancias Bray-Curtis.A continuación se calcula la distancia media dentro de cada comunidad por cada nivel de Tiempo y se estima la tendencia temporal para cada Comunidad. Después. se ponderan las pendientes para calcular un estadístico global y se evalúa su significancia estadística mediante un test de permutación restringida.
+
+```{r}
+
+bray_mat <- as.matrix(bray)
+
+
+intra_bray <- sapply(seq_len(nrow(bray_mat)), function(i) {
+  others <- which(meta$Comunidad == meta$Comunidad[i] &
+                  meta$Tiempo    == meta$Tiempo[i] &
+                  seq_len(nrow(bray_mat)) != i)
+  if (length(others) < 1) return(NA_real_)   # n = 1 -> NA
+  mean(bray_mat[i, others], na.rm = TRUE)
+})
+
+df_bray <-meta
+
+df_bray$Tiempo <- factor(df_bray$Tiempo, levels = sort(unique(df_bray$Tiempo)))
+
+Boxplot_bray<- ggplot(df_bray, aes(x = factor(Tiempo), y = intra_bray)) +
+  geom_boxplot(outlier.shape = NA, coef = 1.5, fill = "lightblue") +
+  geom_jitter(width = 0.2, alpha = 0.5, color = "darkblue") +
+  facet_wrap(~Comunidad, scales = "free_y") +
+  labs(x = "Tiempo", y = "Distancia Bray-Curtis intra-Comunidad") +
+  theme_bw(base_size = 14) +
+  theme(
+    strip.background = element_rect(fill = "lightgray", colour = "black", size = 0.5),
+    strip.text = element_text(margin = margin(t = 1, r = 2, b = 1, l = 2))
+  )
+
+print(Boxplot_bray)
+
+
+ggsave("graficos/Boxplot_bray.png",
+       plot = Boxplot_bray,
+       width = 10, height = 5, dpi = 300)
+
+## -------------------------
+## 1) Utilidades
+## -------------------------
+to_matrix <- function(bray_mat){
+  if (inherits(bray_mat, "dist")) {
+    as.matrix(bray_mat)
+  } else {
+    as.matrix(bray_mat)
+  }
+}
+ 
+## Distancia media dentro de cada (Comunidad x time)
+## y nº de pares usados (para ponderar)
+mean_within_time <- function(Dmat, meta){
+  stopifnot(nrow(Dmat) == nrow(meta))
+  # índices por comunidad x tiempo
+  grp <- interaction(meta$Comunidad, meta$Tiempo, drop = TRUE)
+  idx_list <- split(seq_len(nrow(Dmat)), grp)
+ 
+  out <- lapply(names(idx_list), function(nm){
+    ix <- idx_list[[nm]]
+    # Necesitamos al menos 2 réplicas para formar pares
+    if (length(ix) < 2) return(NULL)
+    Di <- Dmat[ix, ix, drop = FALSE]
+    # media de triángulo superior
+    m <- mean(Di[upper.tri(Di)])
+    n_pairs <- choose(length(ix), 2)
+    parts <- strsplit(nm, split="\\.")[[1]]
+    data.frame(Comunidad = parts[1],
+               Tiempo = as.numeric(paste(parts[-1], collapse=".")), # soporta tiempos no enteros
+               mean_dist = m,
+               n_pairs = n_pairs,
+               stringsAsFactors = FALSE)
+  })
+  do.call(rbind, out)
+}
+ 
+## Pendiente por comunidad (WLS por nº de pares)
+slope_by_Comunidad <- function(df_ct){
+  split(df_ct, df_ct$Comunidad) |>
+    lapply(function(dd){
+      dd <- dd[order(dd$Tiempo), ]
+      # si hay menos de 2 tiempos con datos, no podemos estimar pendiente
+      if (nrow(dd) < 2) return(data.frame(slope = NA_real_,
+                                          n_pairs_total = sum(dd$n_pairs)))
+      fit <- try(suppressWarnings(
+        lm(mean_dist ~ Tiempo, data = dd, weights = n_pairs)
+      ), silent = TRUE)
+      if (inherits(fit, "try-error")) {
+        data.frame(slope = NA_real_, n_pairs_total = sum(dd$n_pairs))
+      } else {
+        data.frame(slope = unname(coef(fit)["Tiempo"]),
+                   n_pairs_total = sum(dd$n_pairs))
+      }
+    }) |>
+    (\(lst) {
+      ans <- do.call(rbind, lst)
+      ans$Comunidad <- rownames(ans)
+      rownames(ans) <- NULL
+      ans
+    })()
+}
+ 
+## Estadístico global: media ponderada de pendientes por nº total de pares
+global_stat <- function(tab_slope){
+  w <- tab_slope$n_pairs_total
+  s <- tab_slope$slope
+  # Si hay NAs, ignora esas comunidades (sin datos suficientes)
+  keep <- is.finite(s) & is.finite(w) & w > 0
+  sum(s[keep] * w[keep]) / sum(w[keep])
+}
+ 
+## Pipeline para obtener estadístico observado
+compute_observed <- function(Dmat, meta){
+  df_ct <- mean_within_time(Dmat, meta)
+  tab_slope <- slope_by_Comunidad(df_ct)
+  list(df_ct = df_ct,
+       tab_slope = tab_slope,
+       stat_global = global_stat(tab_slope))
+}
+ 
+## Permutación: baraja 'time' **dentro de cada comunidad**
+permute_times_within_comm <- function(meta){
+  meta_perm <- meta
+  meta_perm$Tiempo <- ave(meta$Tiempo, meta$Comunidad, FUN = function(t) sample(t))
+  meta_perm
+}
+ 
+## -------------------------
+## 2) Preparación de datos
+## -------------------------
+## Alinea meta y Dmat
+Dmat <- to_matrix(bray_mat)
+ 
+## Asegura que meta$Nombre alinea con filas/columnas de Dmat
+## (suponemos que rownames(Dmat) son Nombres)
+stopifnot(all(meta$Nombre %in% rownames(Dmat)))
+## reordenamos meta y D para que coincidan
+meta <- meta[match(rownames(Dmat), meta$Nombre), ]
+stopifnot(all(meta$Nombre == rownames(Dmat)))
+ 
+## Coerciones
+meta$Comunidad <- as.factor(meta$Comunidad)
+meta$Tiempo <- as.numeric(meta$Tiempo)
+ 
+## -------------------------
+## 3) Observado
+## -------------------------
+obs <- compute_observed(Dmat, meta)
+obs$tab_slope        # pendientes por comunidad
+obs$stat_global      # estadístico global (esperamos negativo si hay convergencia)
+ 
+## -------------------------
+## 4) Permutación restringida (p-valor global)
+## -------------------------
+set.seed(123)
+B <- 4999  # nº de permutaciones (ajusta según tiempo disponible)
+ 
+null_stats <- replicate(B, {
+  meta_p <- permute_times_within_comm(meta)
+  compute_observed(Dmat, meta_p)$stat_global
+})
+ 
+## p-valor unidireccional (H1: stat_global_obs < 0)
+p_global <- (1 + sum(null_stats <= obs$stat_global)) / (B + 1)
+ 
+## -------------------------
+## 5) Resultados
+## -------------------------
+cat(sprintf("Estadístico global (pendiente media ponderada): %.6f\n", obs$stat_global))
+cat(sprintf("p-valor (unil.; convergencia: pendiente < 0): %.4f\n", p_global))
+ 
+## (Opcional) Resumen por comunidad:
+print(obs$tab_slope[order(obs$tab_slope$slope), ], row.names = FALSE)
+ 
+## (Opcional) Visual rápido de la nula vs observado
+ hist(null_stats, breaks=40, main="Distribución nula del estadístico global",
+      xlab="Pendiente media ponderada")
+ abline(v = obs$stat_global, col=2, lwd=2)
+ 
+```
+
+## Análisis de la evolución de la disimilitud intra-Comunidad lo largo del tiempo con distancias Unifrac {#disimiliud-unifrac}
+
+En este apartado se analiza la dinámica temporal de la composición microbiana utilizando la matriz de distancias Unifrac.A continuación se calcula la distancia media dentro de cada comunidad por cada nivel de Tiempo y se estima la tendencia temporal para cada Comunidad. Después, se ponderan las pendientes para calcular un estadístico global y se evalúa su significancia estadística mediante un test de permutación restringida.
+
+```{r}
+
+Uni_mat <- as.matrix(Uni)
+
+intra_Uni <- sapply(seq_len(nrow(Uni_mat)), function(i) {
+  others <- which(meta_Uni$Comunidad == meta_Uni$Comunidad[i] &
+                  meta_Uni$Tiempo    == meta_Uni$Tiempo[i] &
+                  seq_len(nrow(Uni_mat)) != i)
+  if (length(others) < 1) return(NA_real_)   # n = 1 -> NA
+  mean(Uni_mat[i, others], na.rm = TRUE)
+})
+
+df_Uni <-meta_Uni
+
+df_Uni$Tiempo <- factor(df_Uni$Tiempo, levels = sort(unique(df_Uni$Tiempo)))
+
+Boxplot_Uni<- ggplot(df_Uni, aes(x = factor(Tiempo), y = intra_Uni)) +
+  geom_boxplot(outlier.shape = NA, coef = 1.5, fill = "lightblue") +
+  geom_jitter(width = 0.2, alpha = 0.5, color = "darkblue") +
+  facet_wrap(~Comunidad, scales = "free_y") +
+  labs(x = "Tiempo", y = "Distancia Unifrac intra-Comunidad") +
+  theme_bw(base_size = 14) +
+  theme(
+    strip.background = element_rect(fill = "lightgray", colour = "black", size = 0.5),
+    strip.text = element_text(margin = margin(t = 1, r = 2, b = 1, l = 2))
+  )
+
+print(Boxplot_Uni)
+
+
+ggsave("graficos/Boxplot_Uni.png",
+       plot = Boxplot_Uni,
+       width = 10, height = 5, dpi = 300)
+
+## -------------------------
+## 1) Utilidades
+## -------------------------
+to_matrix <- function(D){
+  if (inherits(D, "dist")) {
+    as.matrix(D)
+  } else {
+    as.matrix(D)
+  }
+}
+ 
+## Distancia media dentro de cada (Comunidad x time)
+## y nº de pares usados (para ponderar)
+mean_within_time <- function(Dmat, meta){
+  stopifnot(nrow(Dmat) == nrow(meta))
+  # índices por comunidad x tiempo
+  grp <- interaction(meta$Comunidad, meta$Tiempo, drop = TRUE)
+  idx_list <- split(seq_len(nrow(Dmat)), grp)
+ 
+  out <- lapply(names(idx_list), function(nm){
+    ix <- idx_list[[nm]]
+    # Necesitamos al menos 2 réplicas para formar pares
+    if (length(ix) < 2) return(NULL)
+    Di <- Dmat[ix, ix, drop = FALSE]
+    # media de triángulo superior
+    m <- mean(Di[upper.tri(Di)])
+    n_pairs <- choose(length(ix), 2)
+    parts <- strsplit(nm, split="\\.")[[1]]
+    data.frame(Comunidad = parts[1],
+               Tiempo = as.numeric(paste(parts[-1], collapse=".")), # soporta tiempos no enteros
+               mean_dist = m,
+               n_pairs = n_pairs,
+               stringsAsFactors = FALSE)
+  })
+  do.call(rbind, out)
+}
+ 
+## Pendiente por comunidad (WLS por nº de pares)
+slope_by_Comunidad <- function(df_ct){
+  split(df_ct, df_ct$Comunidad) |>
+    lapply(function(dd){
+      dd <- dd[order(dd$Tiempo), ]
+      # si hay menos de 2 tiempos con datos, no podemos estimar pendiente
+      if (nrow(dd) < 2) return(data.frame(slope = NA_real_,
+                                          n_pairs_total = sum(dd$n_pairs)))
+      fit <- try(suppressWarnings(
+        lm(mean_dist ~ Tiempo, data = dd, weights = n_pairs)
+      ), silent = TRUE)
+      if (inherits(fit, "try-error")) {
+        data.frame(slope = NA_real_, n_pairs_total = sum(dd$n_pairs))
+      } else {
+        data.frame(slope = unname(coef(fit)["Tiempo"]),
+                   n_pairs_total = sum(dd$n_pairs))
+      }
+    }) |>
+    (\(lst) {
+      ans <- do.call(rbind, lst)
+      ans$Comunidad <- rownames(ans)
+      rownames(ans) <- NULL
+      ans
+    })()
+}
+ 
+## Estadístico global: media ponderada de pendientes por nº total de pares
+global_stat <- function(tab_slope){
+  w <- tab_slope$n_pairs_total
+  s <- tab_slope$slope
+  # Si hay NAs, ignora esas comunidades (sin datos suficientes)
+  keep <- is.finite(s) & is.finite(w) & w > 0
+  sum(s[keep] * w[keep]) / sum(w[keep])
+}
+ 
+## Pipeline para obtener estadístico observado
+compute_observed <- function(Dmat, meta){
+  df_ct <- mean_within_time(Dmat, meta)
+  tab_slope <- slope_by_Comunidad(df_ct)
+  list(df_ct = df_ct,
+       tab_slope = tab_slope,
+       stat_global = global_stat(tab_slope))
+}
+ 
+## Permutación: baraja 'time' **dentro de cada comunidad**
+permute_times_within_comm <- function(meta){
+  meta_perm <- meta
+  meta_perm$Tiempo <- ave(meta$Tiempo, meta$Comunidad, FUN = function(t) sample(t))
+  meta_perm
+}
+ 
+## -------------------------
+## 2) Preparación de datos
+## -------------------------
+## Alinea meta y Dmat
+Dmat_Uni <- to_matrix(Uni_mat)
+ 
+## Asegura que meta$Nombre alinea con filas/columnas de Dmat
+## (suponemos que rownames(Dmat) son Nombres)
+stopifnot(all(meta_Uni$Nombre %in% rownames(Dmat_Uni)))
+## reordenamos meta y D para que coincidan
+meta_Uni <- meta_Uni[match(rownames(Dmat_Uni), meta_Uni$Nombre), ]
+stopifnot(all(meta_Uni$Nombre == rownames(Dmat_Uni)))
+ 
+## Coerciones
+meta_Uni$Comunidad <- as.factor(meta_Uni$Comunidad)
+meta_Uni$Tiempo <- as.numeric(meta_Uni$Tiempo)
+ 
+## -------------------------
+## 3) Observado
+## -------------------------
+obs <- compute_observed(Dmat_Uni, meta_Uni)
+obs$tab_slope        # pendientes por comunidad
+obs$stat_global      # estadístico global (esperamos negativo si hay convergencia)
+ 
+## -------------------------
+## 4) Permutación restringida (p-valor global)
+## -------------------------
+set.seed(123)
+B <- 4999  # nº de permutaciones (ajusta según tiempo disponible)
+ 
+null_stats <- replicate(B, {
+  meta_p <- permute_times_within_comm(meta_Uni)
+  compute_observed(Dmat_Uni, meta_p)$stat_global
+})
+ 
+## p-valor unidireccional (H1: stat_global_obs < 0)
+p_global <- (1 + sum(null_stats <= obs$stat_global)) / (B + 1)
+ 
+## -------------------------
+## 5) Resultados
+## -------------------------
+cat(sprintf("Estadístico global (pendiente media ponderada): %.6f\n", obs$stat_global))
+cat(sprintf("p-valor (unil.; convergencia: pendiente < 0): %.4f\n", p_global))
+ 
+## (Opcional) Resumen por comunidad:
+print(obs$tab_slope[order(obs$tab_slope$slope), ], row.names = FALSE)
+ 
+## (Opcional) Visual rápido de la nula vs observado
+ hist(null_stats, breaks=40, main="Distribución nula del estadístico global",
+      xlab="Pendiente media ponderada")
+ abline(v = obs$stat_global, col=2, lwd=2)
+ 
+```
+
+
+
