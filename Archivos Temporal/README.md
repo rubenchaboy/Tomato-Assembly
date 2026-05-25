@@ -1,2 +1,2 @@
 
-![Diseño temporal](temporal.svg)
+![Diseño temporal](imagenes/temporal.svg)
