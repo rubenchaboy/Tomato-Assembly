@@ -18,3 +18,4 @@ En esta carpeta se encuentran los metadatos y el script (tanto en formato _.Rmd_
 
 **Archivos Transmisión**
 En esta carpeta se encuentran los metadatos y el script (tanto en formato _.Rmd_ como _.html_) utilizado para el análisis de los datos.
+![Diseño temporal](temporal.svg)
