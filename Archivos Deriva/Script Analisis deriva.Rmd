@@ -25,7 +25,7 @@ hr {
 
 4. [Eliminación de secuencias no bacterianas](#nobacterias)
 
-5. [Correción de NAs](#nas)
+5. [Corrección de NAs](#nas)
 
 6. [Creación de los objetos de trabajo](#ps)
 
