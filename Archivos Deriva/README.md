@@ -20,3 +20,7 @@ Las secuencias procedentes de Illumina se sometieron a un tratamiento previo con
 
 El objeto resultante de este procesado se encuentra en la sección de [Releases](https://github.com/rubenchaboy/Tomato-Assembly/releases/tag/Deriva) de este repositorio.
 
+## Contenidos
+
+- metadata_Deriva: el archivos excell con los datos correspondientes.
+- `Analisis Deriva.Rmd`/` Analisis Deriva.html`: el script tanto en formato _.Rmd_ como _.html_ con el código utilizado para desarrollar los análisis de este capítulo.  
