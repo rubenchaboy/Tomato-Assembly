@@ -17,7 +17,7 @@ El objeto resultante de este procesado se encuentra en la sección de [Releases]
 ## Contenidos
 
 - metadata_Temp: el archivos excell con los datos correspondientes.
-- Script Analisis temporal.Rmd/ Script Analisis temporal.html: el archivo tanto en formato _.Rmd_ como _.html_ con el código utilizado para desarrollar los análisis de este capítulo.  
+- `Analisis temporal.Rmd`/` Script Analisis temporal.html`: el script tanto en formato _.Rmd_ como _.html_ con el código utilizado para desarrollar los análisis de este capítulo.  
 
 ## Funciones
 
