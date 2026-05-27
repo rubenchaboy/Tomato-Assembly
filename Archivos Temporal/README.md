@@ -17,3 +17,16 @@ Las secuencias procedentes de Illumina se sometieron a un tratamiento previo con
 - metadata_Temp: el archivos excell con los datos correspondientes.
 - Script Analisis temporal.Rmd/ Script Analisis temporal.html: el archivo tanto en formato _.Rmd_ como _.html_ con el código utilizado para desarrollar los análisis de este capítulo.  
 
+**Funciones**
+
+*Análisis de diversidad y correlaciones*
+
+- Se representan los valores de las variables de trabajo (Carga, Peso, RIqueza, Homogeneidad y Diversidad) en función de Comunidad y Tiempo.
+- Se analizan estadísticamente los efectos de Comunidad y Tiempo sobre las variables de trabajo.
+- Se analizan estadísticamente los efectos de Riqueza y Diversidad sobre Carga y Peso.
+
+*Análisis filogenético*
+
+- Se calculan las 10 fmailias más abundantes.
+- Se analiza el efecto de Tiempo sobre la abundancia de los diferentes Filos y Familias.
+- 
