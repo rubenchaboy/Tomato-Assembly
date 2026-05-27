@@ -4231,7 +4231,7 @@ make_euler_for_pair &lt;- function(dos_letras,
                                 presence_threshold = 0,
                                 sample_col = &quot;Nombre&quot;) {
 
-  # Filtrado como tu bucle original
+  # Filtrado
   datos_filtrados &lt;- datos_est %&gt;%
     dplyr::mutate(Componentes = as.character(Componentes)) %&gt;%
     dplyr::filter(grepl(paste0(&quot;^[&quot;, dos_letras, &quot;]+$&quot;), Componentes)) %&gt;%
