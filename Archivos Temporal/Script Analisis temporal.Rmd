@@ -568,12 +568,12 @@ df <- phyloseq::psmelt(ps_familia_rel) |>
   )
 
 
-# Sumar por muestra (Top 10) y añadir "Otros", ordenar la leyenda
+# Sumar por muestra (Top 10) 
 per_sample <- df |>
   group_by(Sample, Comunidad, Tiempo, Family_plot) |>
   summarise(Abund_rel = sum(Abundance), .groups = "drop")
 
-# Resumir para el plot: media por Comunidad x Tiempo x Family_plot
+# Promedio por grupo
 familia_plot <- per_sample |>
   group_by(Comunidad, Tiempo, Family_plot) |>
   summarise(NormalizedAbundance = mean(Abund_rel), .groups = "drop")
