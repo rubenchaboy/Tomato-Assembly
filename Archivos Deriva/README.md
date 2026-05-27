@@ -1,6 +1,6 @@
-# Capítulo Deriva
+# Capítulo 2: Deriva
 
-
+El objetivo de este capítulo es la corroboración experimental del efecto de la deriva ecológica sobre el microbioma rizosférico. A partir de 3 comunidades bacterianas se generaron sies trayectorias independientes, con distinta cantidad de inóculo bacteriano. Empleando estas trayectorias se realizó un experimento sobre plantas de tomate, obteniendo en cada pase el microbioma rizosférico detomate que servirá de inóculo para el siguiente pase.  
 
 
 <p align="center">
