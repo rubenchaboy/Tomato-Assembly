@@ -28,7 +28,7 @@ knitr::opts_chunk$set(echo = TRUE)
  
 4. [Eliminación de secuencias no bacterianas](#nobacterias)
 
-5. [Correción de NAs](#nas)
+5. [Corrección de NAs](#nas)
 
 6. [Subsamplear](#subsampleo)
 
@@ -166,7 +166,7 @@ suppressMessages(summarize_phyloseq(ps_nocontrol_filtrado))
 
 ```
 
-### Correción de NAs {#nas}
+### Corrección de NAs {#nas}
 
 Aquellas muestras que tienen valores de MPN como NA, por no haber crecido las bacterias correspondientes a esas muestras, o por estar por debajo del límite de detección (<110000 MPN/mL) se transforman a  este valor de límite de detección, 440000 bacterias por planta. 
 
