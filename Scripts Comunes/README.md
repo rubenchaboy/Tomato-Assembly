@@ -10,3 +10,10 @@ En esta carpeta se incluyen:
 2. `remove_799F_1193R.py`. Eliminación de las secuencias correspondientes a los primers.
 3. `remove_16S_primers.sh`. Necesario para ejecutar los scripts anteriores. 
 4. `Pipeline DADA2.Rmd`/ `Pipeline DADA2.html`. Provesamiento inicial de las secuencias siguiendo el protocolo de DADA2.
+
+
+### Filogenia
+En esta carpeta se incluyen:
+
+`incorporacion del arbol filogenetico.Rmd`/`incorporacion del arbol filogenetico.html`. AÑade el arbol filogenético al objeto phyloseq para poder realizar medidas filogenéticas. 
+
