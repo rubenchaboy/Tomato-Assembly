@@ -3509,7 +3509,7 @@ for (par in pares) {
   orden_grupos &lt;- orden_grupos[orden_grupos %in% unique(dist_data$Grupo)]
   dist_data$Grupo &lt;- factor(dist_data$Grupo, levels = orden_grupos)
 
-  # Tus colores (rojo/azul/naranja/morado)
+  # colores (rojo/azul/naranja/morado)
   colores_cajas &lt;- c()
   for (grupo in orden_grupos) {
     if (grepl(&quot;intra&quot;, grupo)) {
