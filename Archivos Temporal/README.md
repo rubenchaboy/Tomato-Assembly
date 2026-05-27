@@ -10,7 +10,7 @@ El objetivo de este capítulo fue determinar cómo evolucionan temporalmente las
 
 ## Procesamiento Previo
 
-Las secuencias procedentes de Illumina se sometieron a un tratamiento previo consistente en la eliminación de los cebadores y un procesado siguiendo el Pipeline de DADA2. Los scripts para realizarlo se encuentran en: [Scripts Comunes/Procesamiento inicial](./Scripts%20Comunes/Procesamiento%20inicial)
+Las secuencias procedentes de Illumina se sometieron a un tratamiento previo consistente en la eliminación de los cebadores y un procesado siguiendo el Pipeline de DADA2. Los scripts para realizarlo se encuentran en:[Procesamiento inicial](../Scripts%20Comunes/Procesamiento%20inicial/)
 
 El objeto resultante de este procesado, que es utilizadoen este capítulo, se encuentra en la carpeta de _Datos Temporal_ en la sección de _Realeses_ de este repositorio. 
 
