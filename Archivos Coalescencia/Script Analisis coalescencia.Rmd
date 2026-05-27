@@ -1555,7 +1555,7 @@ make_panel_pair_6 <- function(
 ) {
   message("Procesando pareja: ", pareja)
 
-  # CAMBIO ÚNICO: asegura carpeta salida
+ 
   dir.create(dirname(out_path), recursive = TRUE, showWarnings = FALSE)
 
   find_rainbow_file <- function(pareja, rainbow_dir = "graficos/parejas/rainbow") {
