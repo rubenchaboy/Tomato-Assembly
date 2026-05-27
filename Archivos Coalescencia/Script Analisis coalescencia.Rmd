@@ -1018,7 +1018,7 @@ for (par in pares) {
   orden_grupos <- orden_grupos[orden_grupos %in% unique(dist_data$Grupo)]
   dist_data$Grupo <- factor(dist_data$Grupo, levels = orden_grupos)
 
-  # Tus colores (rojo/azul/naranja/morado)
+  # colores (rojo/azul/naranja/morado)
   colores_cajas <- c()
   for (grupo in orden_grupos) {
     if (grepl("intra", grupo)) {
