@@ -4344,8 +4344,7 @@ enfrentamiento.</p>
 ) {
   message(&quot;Procesando pareja: &quot;, pareja)
 
-  # CAMBIO ÚNICO: asegura carpeta salida
-  dir.create(dirname(out_path), recursive = TRUE, showWarnings = FALSE)
+   dir.create(dirname(out_path), recursive = TRUE, showWarnings = FALSE)
 
   find_rainbow_file &lt;- function(pareja, rainbow_dir = &quot;graficos/parejas/rainbow&quot;) {
   pat_mid &lt;- paste0(&quot;rainbow_.*_&quot;, pareja, &quot;_.*\\.png$&quot;)
