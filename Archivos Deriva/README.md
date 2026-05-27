@@ -23,4 +23,23 @@ El objeto resultante de este procesado se encuentra en la sección de [Releases]
 ## Contenidos
 
 - metadata_Deriva: el archivos excell con los datos correspondientes.
-- `Analisis Deriva.Rmd`/` Analisis Deriva.html`: el script tanto en formato _.Rmd_ como _.html_ con el código utilizado para desarrollar los análisis de este capítulo.  
+- `Analisis Deriva.Rmd`/` Analisis Deriva.html`: el script tanto en formato _.Rmd_ como _.html_ con el código utilizado para desarrollar los análisis de este capít
+  
+## Funciones
+
+### Análisis de diversidad y correlaciones
+
+- Se representan los valores de las variables de trabajo (Carga, Peso, Riqueza, Homogeneidad y Diversidad) en función de Dilución y Pase.
+- Se analizan estadísticamente los efectos de Dilución y Pase sobre las variables de trabajo.
+- Se analizan estadísticamente los efectos de Riqueza y Diversidad sobre Carga y Peso.
+
+### Análisis filogenético
+
+- Se calculan las 10 fmailias más abundantes.
+
+ ### Análisis de la composición
+
+- Representación de la composición microbiana mediante el método NMDS utilizando distancias Bray-Curtis, separando los datos por Dilución y Tiempo, y agrupándolos visualmente según estas variables.
+- Análisis de redundancia basado en distancias (dbRDA con Bray–Curtis) en su versión parcial, modelando la composición de las muestras en función de Pase mientras se controla el efecto de Dilución y también modelando la composición de las muestras en función de Dilución mientras se controla por Pase.
+- Representación de la composición microbiana mediante el método NMDS utilizando distancias Unifrac, separando los datos por Dilución y Pase, y agrupándolos visualmente según estas variables.
+- Análisis de redundancia basado en distancias (dbRDA con Unifrac) en su versión parcial, modelando la composición de las muestras en función de Pase mientras se controla el efecto de Dilución y también modelando la composición de las muestras en función de Dilución mientras se controla por Pase.
