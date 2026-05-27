@@ -35,7 +35,7 @@ El objeto resultante de este procesado se encuentra en la sección de [Releases]
 
 ### Análisis filogenético
 
-- Se calculan las 10 fmailias más abundantes.
+- Se calculan las 10 familias más abundantes.
 
  ### Análisis de la composición
 
