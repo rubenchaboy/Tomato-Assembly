@@ -12,7 +12,7 @@ El objetivo de este capítulo fue determinar cómo evolucionan temporalmente las
 
 Las secuencias procedentes de Illumina se sometieron a un tratamiento previo consistente en la eliminación de los cebadores y un procesado siguiendo el Pipeline de DADA2. Los scripts para realizarlo se encuentran en: [Procesamiento inicial](../Scripts%20Comunes/Procesamiento%20inicial/)
 
-El objeto resultante de este procesado, que es utilizadoen este capítulo, se encuentra en la carpeta de _Datos Temporal_ en la sección de _Realeses_ de este repositorio. 
+El objeto resultante de este procesado se encuentra en la sección de [Releases](https://github.com/rubenchaboy/Tomato-Assembly/releases/tag/Temporal) de este repositorio.
 
 ## Contenidos
 
