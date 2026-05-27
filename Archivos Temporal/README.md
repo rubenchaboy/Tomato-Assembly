@@ -21,18 +21,18 @@ El objeto resultante de este procesado, que es utilizadoen este capítulo, se en
 
 ## Funciones
 
-# Análisis de diversidad y correlaciones
+### Análisis de diversidad y correlaciones
 
 - Se representan los valores de las variables de trabajo (Carga, Peso, RIqueza, Homogeneidad y Diversidad) en función de Comunidad y Tiempo.
 - Se analizan estadísticamente los efectos de Comunidad y Tiempo sobre las variables de trabajo.
 - Se analizan estadísticamente los efectos de Riqueza y Diversidad sobre Carga y Peso.
 
-# Análisis filogenético
+### Análisis filogenético
 
 - Se calculan las 10 fmailias más abundantes.
 - Se analiza el efecto de Tiempo sobre la abundancia de los diferentes Filos y Familias.
 
-# Análisis de la composición
+### Análisis de la composición
 
 - Representación de la composición microbiana mediante el método NMDS utilizando distancias Bray-Curtis, separando los datos por tipo de Comunidad y tiempo de muestreo, y agrupándolos visualmente según estas variables.
 - Representación la composición microbiana, mediante el método NMDS utilizando distancias Bray-Curtis, separando los datos por cada tipo de Comunidad y agrupándolos según el tiempo de muestreo.
