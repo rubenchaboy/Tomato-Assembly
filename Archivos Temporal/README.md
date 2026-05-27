@@ -23,7 +23,7 @@ El objeto resultante de este procesado se encuentra en la sección de [Releases]
 
 ### Análisis de diversidad y correlaciones
 
-- Se representan los valores de las variables de trabajo (Carga, Peso, RIqueza, Homogeneidad y Diversidad) en función de Comunidad y Tiempo.
+- Se representan los valores de las variables de trabajo (Carga, Peso, Riqueza, Homogeneidad y Diversidad) en función de Comunidad y Tiempo.
 - Se analizan estadísticamente los efectos de Comunidad y Tiempo sobre las variables de trabajo.
 - Se analizan estadísticamente los efectos de Riqueza y Diversidad sobre Carga y Peso.
 
