@@ -28,10 +28,10 @@ El objeto resultante de este procesado se encuentra en la sección de [Releases]
 Para cada pareja de comunidades y sus respectivas comunidades individuales: 
 
 - Se representa la composición microbiana mediante el método NMDS utilizando distancias Bray-Curtis.
-- Se calcula las distancias Bray-Curtis entre las muestras y se representa con digramas de cajas para evaluar:
+- Se calculan las distancias Bray-Curtis entre las muestras y se representan con diagramas de cajas para evaluar:
+  - la variabilidad dentro de cada comunidad (intra-grupo).
+  - las diferencias entre cada comunidad y su mezcla.
   
-         -  la variabilidad dentro de cada comunidad (intra-grupo).
-         - las diferencias entre cada comunidad y su mezcla.  
 - Se representa la composición microbiana mediante el método NMDS utilizando distancias Unifrac.
 - Se calcula las distancias Unifracentre las muestras y se representa con digramas de cajas para evaluar:
          -  la variabilidad dentro de cada comunidad (intra-grupo).
