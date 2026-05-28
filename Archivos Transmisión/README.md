@@ -1,6 +1,6 @@
 # Capítulo 5: Transmisión
 
-El objetivo de este capítulo es la corroboración experimental del efecto de la deriva ecológica sobre el microbioma rizosférico. A partir de 3 comunidades bacterianas se generaron sies trayectorias independientes, con distinta cantidad de inóculo bacteriano. Empleando estas trayectorias se realizó un experimento sobre plantas de tomate, obteniendo en cada pase el microbioma rizosférico detomate que servirá de inóculo para el siguiente pase.  
+El objetivo de este capítulo es Validar en la rizosfera las observaciones de Meyer y colaboradores en la filosfera (Meyer et al. 2023) respecto de cómo el modo de transmisión de los microbiomas afecta a su ensamblaje.
 
 **Transmisión conespecífica**
 
