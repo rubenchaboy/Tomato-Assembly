@@ -17,8 +17,6 @@ El objeto resultante de este procesado se encuentra en la sección de [Releases]
 
 ### Análisis de diversidad y correlaciones
 
-- Se representan los valores de las variables de trabajo (Carga, Peso, Riqueza, Homogeneidad y Diversidad) en función de Dilución y Pase.
-- Se analizan estadísticamente los efectos de Dilución y Pase sobre las variables de trabajo.
 - Se analizan estadísticamente los efectos de Riqueza y Diversidad sobre Carga y Peso.
 
 ### Análisis filogenético
@@ -27,7 +25,22 @@ El objeto resultante de este procesado se encuentra en la sección de [Releases]
 
  ### Análisis de la composición
 
-- Representación de la composición microbiana mediante el método NMDS utilizando distancias Bray-Curtis, separando los datos por Dilución y Tiempo, y agrupándolos visualmente según estas variables.
-- Análisis de redundancia basado en distancias (dbRDA con Bray–Curtis) en su versión parcial, modelando la composición de las muestras en función de Pase mientras se controla el efecto de Dilución y también modelando la composición de las muestras en función de Dilución mientras se controla por Pase.
-- Representación de la composición microbiana mediante el método NMDS utilizando distancias Unifrac, separando los datos por Dilución y Pase, y agrupándolos visualmente según estas variables.
-- Análisis de redundancia basado en distancias (dbRDA con Unifrac) en su versión parcial, modelando la composición de las muestras en función de Pase mientras se controla el efecto de Dilución y también modelando la composición de las muestras en función de Dilución mientras se controla por Pase.
+Para cada pareja de comunidades y sus respectivas comunidades individuales: 
+
+- Se representa la composición microbiana mediante el método NMDS utilizando distancias Bray-Curtis.
+- Se calcula las distancias Bray-Curtis entre las muestras y se representa con digramas de cajas para evaluar:
+         -  la variabilidad dentro de cada comunidad (intra-grupo).
+         - las diferencias entre cada comunidad y su mezcla.  
+- Se representa la composición microbiana mediante el método NMDS utilizando distancias Unifrac.
+- Se calcula las distancias Unifracentre las muestras y se representa con digramas de cajas para evaluar:
+         -  la variabilidad dentro de cada comunidad (intra-grupo).
+         - las diferencias entre cada comunidad y su mezcla.
+
+  Para todos esos análisis se genera primero un bucle en el que se crean los objetos phyloseq para todas las combinaciones de parejas. Cada uno de estos objetos contiene las muestras de las comunidades individuales así como las de la pareja que forman. En un segundo bucle, se lanza la función correspondiente (representación mediante NMDS con 
+
+   ### Análisis de ASVs
+  
+- Se generan plots de “rainbow” para comparar abundancias de ASVs entre la pareja de comunidades y las comunidades individuales que la forman.
+- Se generan diagramas de Euler para comparar la presencia de ASVs entre la pareja de comunidades y las comunidades individuales que la forman.
+  
+En ambos casos Primero se prepara la función, después se preparan los diferentes objetos phyloseq con las combinaciones de las comunidades y, por último, se lanza la función con un bucle para todos estos objetos.
