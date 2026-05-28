@@ -28,10 +28,31 @@ El objeto resultante de este procesado se encuentra en la sección de [Releases]
 
 ## Funciones  Script Analisis Transmision
 
+### Análisis de diversidad y correlaciones
 
+- Se representan los valores de las variables de trabajo (Carga, Peso, Riqueza, Homogeneidad y Diversidad) en función del pase de muestreo, la especie de Hospedador y el modo de Transmisisón. 
+- Se analiza estadísticamente el efecto de Pase, Hospedador, Transmisión y de la interacción entre Hospedador y Transmisión sobre Riqueza, Homogeneidad y Diversidad.
+- En el último pase de muestreo se analiza el efecto de Transmisión sobre Riqueza, Homogeneidad y Diversidad.
+- En el último pase de muestreo se analizan los efectos de la especie de planta sobre las variables Carga y Peso.
+- Se analizan estadísticamente los efectos de Riqueza y Diversidad sobre Carga y Peso.
+- 
+### Análisis filogenético
 
+- Se calculan las 10 familias más abundantes.
 
+### Análisis de las comuniades microbianas
 
+- Se realiza una PERMANOVA sobre las disimilitudes Bray-Curtis de las comunidades microbianas con los términos: Pase, Hospedador, Transmisión e interacción Hospedador-Transmisión.
+- Se determina el efecto estandarizado de la distancia filogenética media (MPD SES, del inglés, Mean Pairwise Distance Standardized Effect Size) entre pares de taxones coocurrentes y se representan estos valores para cada modo de transmisión y especie de planta.
+
+### Efectos de la especie de Hospedador
+
+- Se evalúa el efecto de la identidad del hospedador sobre la composición de las comunidades microbianas utilizando distancias Bray-Curtis y empleando una PERMANOVA.
+- Se evalúa el efecto del hospedador previo sobre la composición microbiana cuando las líneas heteroespecíficas están en tomate.
+
+### Enriquecimiento de taxones
+
+Disponible en el Script `Analisis ASVs.Rmd`/` Analisis ASVs.html`.
 
 ## Funciones  Script Analisis ASVs
 
