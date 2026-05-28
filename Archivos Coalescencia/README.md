@@ -1,4 +1,4 @@
-# Capítulo 2: Coalescencia
+# Capítulo 3: Coalescencia
 EL objetivo de este capítulo es estudiar, mediante la aplicación de distintos análisis, los posibles resultados de los procesos de coalescencia de comunidades, ya sea una comunidad resultante dominada por alguna de las comunidades enfrentadas o una combinación de estas comunidades. Los resultados obtenidos podrán servir para evidenciar unas reglas generales sobre el proceso de coalescencia y compararlas con las propuestas por otros investigadores a través de simulaciones o estudios in vitro.
 
 
