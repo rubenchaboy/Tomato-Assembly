@@ -319,7 +319,7 @@ saveRDS(ps_nocontrol_filtrado_rare, "ps_nocontrol_filtrado_rare_noMF.rds")
 
 ### Representación de las variables de trabajo {#representacion}
 
-Se representan los valores de las variables de trabajo según Hospedador y Transmisión.
+Se representan los valores de las variables de trabajo según Pase, Hospedador y Transmisión.
 
 ```{r}
 
