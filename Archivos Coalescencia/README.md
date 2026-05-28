@@ -23,7 +23,7 @@ El objeto resultante de este procesado se encuentra en la sección de [Releases]
 
 - Se calculan las 10 familias más abundantes.
 
- ### Análisis de la composición
+### Análisis de la composición
 
 Para cada pareja de comunidades y sus respectivas comunidades individuales: 
 
@@ -39,7 +39,7 @@ Para cada pareja de comunidades y sus respectivas comunidades individuales:
 
   Para todos esos análisis se genera primero un bucle en el que se crean los objetos phyloseq para todas las combinaciones de parejas. Cada uno de estos objetos contiene las muestras de las comunidades individuales así como las de la pareja que forman. En un segundo bucle, se lanza la función para el análisis que corresponda. 
 
-   ### Análisis de ASVs
+### Análisis de ASVs
   
 - Se generan plots de “rainbow” para comparar abundancias de ASVs entre la pareja de comunidades y las comunidades individuales que la forman.
 - Se generan diagramas de Euler para comparar la presencia de ASVs entre la pareja de comunidades y las comunidades individuales que la forman.
