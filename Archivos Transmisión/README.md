@@ -24,3 +24,4 @@ El objeto resultante de este procesado se encuentra en la sección de [Releases]
 
 - metadata_Transmision: el archivos excell con los datos correspondientes.
 - `Analisis Transmision.Rmd`/` Analisis Transmision.html`: el script tanto en formato _.Rmd_ como _.html_ con el código utilizado para desarrollar los análisis de este capítulo.
+- `Analisis ASVs.Rmd`/` Analisis ASVs.html`:  el script tanto en formato _.Rmd_ como _.html_ con el código utilizado para desarrollar los análisis de este capítulo
