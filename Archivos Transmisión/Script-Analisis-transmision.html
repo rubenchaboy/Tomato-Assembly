@@ -1361,7 +1361,7 @@ saveRDS(ps_nocontrol_filtrado_rare, &quot;ps_nocontrol_filtrado_rare_noMF.rds&qu
 <div id="representacion" class="section level3">
 <h3>Representación de las variables de trabajo</h3>
 <p>Se representan los valores de las variables de trabajo según
-Hospedador y Transmisión.</p>
+Pase, Hospedador y Transmisión.</p>
 <pre class="r"><code>Riqueza_Conespecifica &lt;- datos_est %&gt;% 
   filter(Tipo_linea==&#39;Conespecífica&#39;)%&gt;%
   ggplot(aes(x=as.factor(Pase),y=Riqueza, fill=Hospedador)) +
