@@ -34,10 +34,10 @@ Para cada pareja de comunidades y sus respectivas comunidades individuales:
   
 - Se representa la composición microbiana mediante el método NMDS utilizando distancias Unifrac.
 - Se calcula las distancias Unifracentre las muestras y se representa con digramas de cajas para evaluar:
-         -  la variabilidad dentro de cada comunidad (intra-grupo).
-         - las diferencias entre cada comunidad y su mezcla.
+  - la variabilidad dentro de cada comunidad (intra-grupo).
+  - las diferencias entre cada comunidad y su mezcla.
 
-  Para todos esos análisis se genera primero un bucle en el que se crean los objetos phyloseq para todas las combinaciones de parejas. Cada uno de estos objetos contiene las muestras de las comunidades individuales así como las de la pareja que forman. En un segundo bucle, se lanza la función correspondiente (representación mediante NMDS con 
+  Para todos esos análisis se genera primero un bucle en el que se crean los objetos phyloseq para todas las combinaciones de parejas. Cada uno de estos objetos contiene las muestras de las comunidades individuales así como las de la pareja que forman. En un segundo bucle, se lanza la función para el análisis que corresponda. 
 
    ### Análisis de ASVs
   
@@ -45,3 +45,11 @@ Para cada pareja de comunidades y sus respectivas comunidades individuales:
 - Se generan diagramas de Euler para comparar la presencia de ASVs entre la pareja de comunidades y las comunidades individuales que la forman.
   
 En ambos casos Primero se prepara la función, después se preparan los diferentes objetos phyloseq con las combinaciones de las comunidades y, por último, se lanza la función con un bucle para todos estos objetos.
+
+### Preparación de paneles
+
+Para cada combinación de dos comunidades y su pareja, se crea un panel con todas los gráficos anteriores. Como título de panel se añaden las dos comunidades individuales y la comunidad que resulte ganadora del enfrentamiento.
+
+### Red de resultados
+
+Con los resultados de los enfrentamientos de las comunidades individuales, se genera una red de combinaciones donde se muestra el ganador de cada enfrentamiento.
