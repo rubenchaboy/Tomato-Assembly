@@ -10,7 +10,7 @@ El objetivo de este capítulo es la corroboración experimental del efecto de la
 
 **Experimento de pases**
 <p align="center">
-  <img src="imagenes/Deriva_parte_2.svg" alt="DDeriva_parte_2">
+  <img src="imagenes/Deriva_parte_2.svg" alt="Deriva_parte_2">
 </p>
 
 
