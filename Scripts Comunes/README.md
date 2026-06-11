@@ -15,5 +15,5 @@ En esta carpeta se incluyen:
 ### Filogenia
 En esta carpeta se incluyen:
 
-`incorporacion del arbol filogenetico.Rmd`/`incorporacion del arbol filogenetico.html`. AÑade el arbol filogenético al objeto phyloseq para poder realizar medidas filogenéticas. 
+`incorporacion del arbol filogenetico.Rmd`/`incorporacion del arbol filogenetico.html`. Añade el arbol filogenético al objeto phyloseq para poder realizar medidas filogenéticas. 
 
