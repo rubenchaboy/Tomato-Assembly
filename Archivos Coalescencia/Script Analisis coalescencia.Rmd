@@ -730,7 +730,7 @@ for (par in pares) {
   )
 
   if (is.null(dist_data) || nrow(dist_data) == 0) {
-    message("  ✗ No hay suficientes datos para ", pareja)
+    message(" No hay suficientes datos para ", pareja)
     next
   }
 
@@ -1004,7 +1004,7 @@ for (par in pares) {
   )
 
   if (is.null(dist_data) || nrow(dist_data) == 0) {
-    message("  ✗ No hay suficientes datos para ", pareja)
+    message("  No hay suficientes datos para ", pareja)
     next
   }
 
