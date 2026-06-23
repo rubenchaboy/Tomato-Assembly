@@ -541,7 +541,7 @@ p_pareja <- p_pareja +
     position = position_jitter(width = 0.09, height = 0.09)
   ) +
   scale_shape_manual(values = c(Individual = 22, Pareja = 21)) +
-  scale_fill_brewer(palette = "Set1") +   # o Set2 / Dark2
+  scale_fill_brewer(palette = "Set1") +   
   guides(
     fill  = guide_legend(override.aes = list(shape = 21, color = "black")),
     shape = guide_legend(override.aes = list(fill = "white", color = "black"))
@@ -849,7 +849,7 @@ for (par in pares) {
     position = position_jitter(width = 0.09, height = 0.09)
   ) +
   scale_shape_manual(values = c(Individual = 22, Pareja = 21)) +
-  scale_fill_brewer(palette = "Set1") +   # o Set2 / Dark2
+  scale_fill_brewer(palette = "Set1") +   
   guides(
     fill  = guide_legend(override.aes = list(shape = 21, color = "black")),
     shape = guide_legend(override.aes = list(fill = "white", color = "black"))
