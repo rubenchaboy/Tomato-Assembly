@@ -706,7 +706,7 @@ for (par in pares) {
 
   obj_name <- paste0("ps_nocontrol_filtrado_rare", pareja)
   if (!exists(obj_name, inherits = TRUE)) {
-    message("  ✗ No existe objeto: ", obj_name, " (saltando)")
+    message(" No existe objeto: ", obj_name, " (saltando)")
     next
   }
 
