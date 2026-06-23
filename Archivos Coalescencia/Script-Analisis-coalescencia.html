@@ -2252,8 +2252,8 @@ names(colores_cajas) &lt;- orden_grupos
   p_box &lt;- ggplot(dist_data, aes(x = Grupo, y = Distancia, fill = Grupo)) +
     geom_boxplot(alpha = 0.7, outlier.shape = NA) +
     geom_jitter(width = 0.2, alpha = 0.5, size = 2, aes(color = Grupo)) +
-    scale_fill_manual(values = colores_cajas, name = &quot;Comparación&quot;) +  #añadido nuevo
-     scale_color_manual(values = colores_cajas, guide = &quot;none&quot;) + #añadido
+    scale_fill_manual(values = colores_cajas, name = &quot;Comparación&quot;) +  
+     scale_color_manual(values = colores_cajas, guide = &quot;none&quot;) + 
     labs(
       title = paste(&quot;Análisis intra e inter Grupo (Distancias Bray-Curtis)&quot;),
       x = &quot;Comparación de componentes&quot;,
@@ -3531,8 +3531,8 @@ for (par in pares) {
   p_box &lt;- ggplot(dist_data, aes(x = Grupo, y = Distancia, fill = Grupo)) +
     geom_boxplot(alpha = 0.6, outlier.shape = NA) +
     geom_jitter(width = 0.2, alpha = 0.5, size = 2, aes(color = Grupo)) +
-    scale_fill_manual(values = colores_cajas, name = &quot;Comparación&quot;) +  #añadido nuevo
-     scale_color_manual(values = colores_cajas, guide = &quot;none&quot;) + #añadido
+    scale_fill_manual(values = colores_cajas, name = &quot;Comparación&quot;) +  
+     scale_color_manual(values = colores_cajas, guide = &quot;none&quot;) + 
     labs(
       title = paste(&quot;Análisis intra e inter grupo (Distancias Unifrac)&quot;),
       x = &quot;Comparación de componentes&quot;,
