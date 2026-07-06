@@ -1325,6 +1325,7 @@ for (name in names(ps_list)) {
      
     datos_est$Dilucion &lt;- as.numeric(datos_est$Dilucion)
    datos_est$cDilucion    &lt;- as.numeric(scale(datos_est$Dilucion, center = TRUE, scale = TRUE))
+  datos_est$log_Peso_Seco_mg <- log10(1000*datos_est$Peso_Seco)
 
 
   datos_est_list[[name]] &lt;- datos_est
